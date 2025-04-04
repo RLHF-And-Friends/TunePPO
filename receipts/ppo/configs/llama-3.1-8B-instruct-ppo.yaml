@@ -1,0 +1,179 @@
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B-Instruct model.
+#
+# This config uses hyperparameters based on small set of experiments and information
+# available from existing implementations.
+#
+# This config assumes that you've run the following commands before launching
+# this run: (take a look what prefix is down the config)
+# 1. Download a reward model
+#   a. (Nicolinho) tune download nicolinho/QRM-Llama3.1-8B-v2 --output-dir ${prefix}/models/Llama3.1-8B-nicolinho-RM/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2  --output-dir ${prefix}/models/Llama3.1-8B-Skywork-RM/ --ignore-patterns "original/consolidated.00.pth"
+# 2. Download the policy model
+#   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ${prefix}/models/Llama3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#
+# You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
+# value models as well as WandBLogger logs are saved in sub-folders.
+#
+# To launch on N devices (starting from 1), run the following command from repo root:
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/llama-3.1-8B-instruct-ppo.yaml
+#
+# You can add specific overrides through the command line. For example
+# to override the checkpointer directory while launching training
+# you can run:
+#   tune run --nproc_per_node N receipts/ppo.py --config receipts/ppo/configs/llama-3.1-8B-instruct-ppo.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#
+
+# NOTE: Use full paths only. '~' would not expand.
+# NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
+# updated.
+
+
+# Change those to your preference. Do not do that via CLI!
+# prefix: /home/optteam/.torchtune
+prefix: /home/evgurovv/torchtune
+
+project: TLDR
+group: LLAMA-TEST
+# model: Llama3.1-8B-Instruct
+model: Llama3.1-8B-Base
+reward: Llama3.1-8B-Skywork-RM
+run: test
+
+output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
+
+# Tokenizer
+tokenizer:
+  _component_: torchtune.models.llama3.llama3_tokenizer
+  path: ${prefix}/models/${model}/original/tokenizer.model
+  max_seq_len: 2500
+
+# Dataset
+dataset:
+  _component_: torchtune.datasets.text_completion_dataset
+  # source: RLHF-And-Friends/tldr-ppo
+  source: trl-lib/tldr
+  split: train
+  column: prompt
+  add_eos: False
+
+# Policy / Reference Policy when adapter disabled
+policy:
+  _component_: torchtune.models.llama3_1.lora_llama3_1_8b
+  # (Q)LoRA
+  lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+  apply_lora_to_mlp: True
+  apply_lora_to_output: False
+  lora_rank: 64  # higher increases accuracy and memory
+  lora_alpha: 16  # usually alpha=2*rank
+  lora_dropout: 0.0
+  quantize_base: False # stands for 'Q' in QLoRA
+
+# Value Model / Reward Model when adapter disabled
+scorer:
+  _component_: ppotune.models.llama3_1.lora_llama3_1_reward_8b
+  # (Q)LoRA
+  lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+  apply_lora_to_mlp: True
+  apply_lora_to_output: = True
+  lora_rank: 16
+  lora_alpha: 32
+  lora_dropout: 0.0
+  quantize_base: False
+
+# main checkpointer is for the policy model
+policy_checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointer
+  checkpoint_dir: ${prefix}/models/${model}/
+  checkpoint_files:
+    [
+      "model-00001-of-00004.safetensors",
+      "model-00002-of-00004.safetensors",
+      "model-00003-of-00004.safetensors",
+      "model-00004-of-00004.safetensors"
+    ]
+  # this is the only place where you should update `recipe_checkpoint` if resuming training
+  recipe_checkpoint: null
+  output_dir: ${output_dir}/policy
+  model_type: LLAMA3
+
+# checkpointer for the value model initialized with the reward model weights
+scorer_checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointer
+  checkpoint_dir: ${prefix}/models/${reward}/
+  checkpoint_files:
+    [
+      "model-00001-of-00004.safetensors",
+      "model-00002-of-00004.safetensors",
+      "model-00003-of-00004.safetensors",
+      "model-00004-of-00004.safetensors"
+    ]
+  output_dir: ${output_dir}/value
+  model_type: REWARD
+
+seed: 0xD1CE
+shuffle: True
+
+# Training arguments
+batch_size: 64
+group_size: 1 # needed in GRPO. just leave it as is.
+num_steps: 10000
+ppo_epochs: 2
+ppo_batch_size: 32
+gradient_accumulation_steps: 4 # Use to increase effective batch size
+
+# Memory management and performance
+optimizer:
+  _component_: bitsandbytes.optim.PagedAdamW
+  lr: 1e-4
+
+dtype: bf16 # | fp32 | fp16 is not supported
+
+# batch size for forward pass during generation
+forward_batch_size: 8
+max_generated_tokens: 58
+temperature: 0.7
+top_k: null
+
+sampler:
+  _component_: torch.utils.data.DistributedSampler
+
+reward_model:
+  _component_: ppotune.reward.PerTokenKLPenalizedRewardModel
+  min_response_len: 18   # would penalize generations shorter than
+  penalise_no_eos: True     # would penalize generations with no eos
+  reward_penalty: -3        # penalty value
+  kl_coeff: 0.01            # per token kl-penalty coefficient
+
+advantage_model:
+  _component_: ppotune.advantage.LLMCriticGAE
+  gamma: 1
+  lmbda: 0.95
+  value_coeff: 0.1
+  value_clip_range: 0.2
+
+kl_penalty:
+  _component_: ppotune.loss.KLPenalty
+  coeff: 0.00
+
+reference_model:
+  _component_: ppotune.dist.DistributedPolicyMixture
+  # Regulates probability mass given to self-reference acc. to formula
+  # ref = self_preference * self_ref + (1 - self_preference) * others_ref.mean()
+  # Needed in cooperative setup. In single-agent setup set to null
+  self_preference: null 
+
+# PPO Loss
+# clipping hyperparameter
+epsilon: 0.2
+
+# Logging
+wandb_logger:
+  dir: ${prefix}
+  entity: RADFAN
+  project: ${project}
+  group: ${group}
+  name: ${model}-${run}
+
+log_every_n_steps: 1
+update_ref_policy_every_n_steps: 13
