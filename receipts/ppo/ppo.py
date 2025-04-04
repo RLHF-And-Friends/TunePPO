@@ -3,7 +3,6 @@
 
 import math
 import sys
-import wandb
 
 from functools import partial
 from itertools import chain
@@ -29,19 +28,17 @@ from torchtune.modules.peft import (
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.recipe_interfaces import FTRecipeInterface
 from torchtune.training.checkpointing import Checkpointer
-from torchtune.training.metric_logging import WandBLogger
 from torchtune.utils import log_rank_zero
 from tqdm import tqdm
 
 from ppotune.advantage import IAdvantageModel
 from ppotune.datatypes import (
-    PenalizedPPOStats,
-    ExtendedTrajectory,
-    AEReturnType,
-    RMReturnType
+    PPOTrajectoryStats,
+    AdvantageTrajectoryStats,
 )
 from ppotune.dist import DistributedPolicyMixture
 from ppotune.loss import KLPenalty
+from ppotune.log import WandbLogger
 from ppotune.peft import (
     get_adapter_config,
     get_merged_adapter_state_dict,
@@ -52,6 +49,7 @@ from ppotune.reward import IRewardModel
 from ppotune.utils import grad_norm
 
 log = utils.get_logger("DEBUG")
+wandb_logger = WandbLogger()
 
 
 class PPORecipe(FTRecipeInterface):
@@ -124,9 +122,8 @@ class PPORecipe(FTRecipeInterface):
         self._device = utils.get_device("cuda")
         self._dtype = training.get_dtype(cfg.dtype, device=self._device)
 
-        # logging attributes
+        # checkpointing attributes
         self._output_dir = cfg.output_dir
-        self._log_every_n_steps = cfg.get("log_every_n_steps", 1)
 
         # manually set up a generator
         self.seed = training.set_seed(seed=cfg.seed)
@@ -150,10 +147,9 @@ class PPORecipe(FTRecipeInterface):
         """
         Sets up the recipe state correctly.
         """
-        self._metric_logger = self._setup_wandb_logger(cfg.wandb_logger)
-        # log the final config with parameter override
-        if dist.get_rank() == 0:
-            self._metric_logger.log_config(cfg)
+        # setup logger
+        wandb_logger.setup(cfg.logger)
+        wandb_logger.log_config(cfg)
 
         # setup checkpointers
         self._policy_checkpointer = self._setup_checkpointer(
@@ -222,33 +218,12 @@ class PPORecipe(FTRecipeInterface):
             device=self._device,
         )
 
-    def _setup_wandb_logger(
-        self,
-        cfg_logger: DictConfig
-    ) -> WandBLogger:
-        """
-        Sets up metric logger for each process.
-        """
-        # set distinct run names for each agent
-        if name := cfg_logger.get("name"):
-            name = f"{name}-{dist.get_rank()}/{dist.get_world_size() - 1}"
-
-        # initialize wandb in advance to have it for each agent
-        wandb.init(
-            dir=cfg_logger.dir,
-            entity=cfg_logger.entity,
-            project=cfg_logger.project,
-            group=cfg_logger.group,
-            name=name,
-        )
-        return WandBLogger(**cfg_logger)
-
     def _setup_checkpointer(
         self,
         ckpt_cfg: DictConfig
     ) -> Checkpointer:
         """
-        Sets up checkpointer
+        Sets up checkpointer.
         """
         # set different output dir names for each agent
         output_dir = ckpt_cfg.output_dir
@@ -263,8 +238,7 @@ class PPORecipe(FTRecipeInterface):
 
     def _setup_hyperparameters(self, cfg: DictConfig) -> None:
         """
-        Sets up the training hyperparameters for the recipe. This includes the GAE hyperparameters,
-        generation hyperparameters, reward masking hyperparameters, and stop token ids.
+        Sets up some training hyperparameters that have not been wrapped up into some module yet.
         """
         # trajectory generation args
         self._temperature = cfg.temperature
@@ -277,8 +251,8 @@ class PPORecipe(FTRecipeInterface):
     def _setup_batch_sizes(self, cfg: DictConfig) -> None:
         """
         Validates and sets up parameters for used during training and for tracking training state,
-        batch sizes for model forward passes during trajectory generation, PPO minibatches, and
-        PPO microbatches for gradient accumulation.
+        batch sizes for model forward passes during trajectory generation, PPO minibatches,
+        PPO microbatches for gradient accumulation and GRPO group sizes.
 
         Raises
             - ValueError if:
@@ -286,6 +260,8 @@ class PPORecipe(FTRecipeInterface):
                 - batch_size is not divisible by ppo_batch_size
                 - ppo_batch_size is not divisible by gradient_accumulation_steps
                 - num_steps is less than batch_size
+                - (grpo) batch_size is not divisible by group size
+                - (grpo) forward_batch_size is not divisible by group_size
         """
         self.batch_size = cfg.batch_size
         self.group_size = cfg.group_size
@@ -359,7 +335,7 @@ class PPORecipe(FTRecipeInterface):
         model_state_dict: Dict[str, Any]
     ) -> TransformerDecoder:
         """
-        Sets up a model
+        Sets up a LoRA model.
         """
         # note: ensure put.bias is not in scorer state dict
         with training.set_default_dtype(self._dtype), self._device:
@@ -410,7 +386,7 @@ class PPORecipe(FTRecipeInterface):
         )
         return sampler, dataloader
 
-    def generate_trajectory(self, input_ids: torch.Tensor) -> ExtendedTrajectory:
+    def generate_trajectory(self, input_ids: torch.Tensor) -> PPOTrajectoryStats:
         """
         Generates a trajectory given the current policy and value models, the reference policy
         model, the reward model, and batch of inputs. This is done over the following steps:
@@ -428,12 +404,12 @@ class PPORecipe(FTRecipeInterface):
             input_ids (torch.Tensor): tensor of input token IDs with shape [b, seq_length]
 
         Returns:
-            Trajectory: An instance of :class:`~torchtune.rlhf.Trajectory` comprising
-                the current trajectory.
+            PPOTrajectoryStats: An instance of :class:`ppotune.datatypes.PPOTrajectoryStats`
+                comprising the current trajectory.
         """
         query_len = input_ids.shape[1]
 
-        #  generate responses and logits
+        # generate responses and logits
         with self.cache_ctx_manager():
             tokens, logits = generation.generate(
                 model=self._policy,
@@ -480,7 +456,7 @@ class PPORecipe(FTRecipeInterface):
         ref_logprobs[responses_pad_mask] = 1.0
         del ref_logits
 
-        rr: RMReturnType = self.rm(
+        rewards = self.rm(
             tokens,
             causal_mask,
             position_ids,
@@ -488,29 +464,26 @@ class PPORecipe(FTRecipeInterface):
             gen_logprobs=gen_logprobs,
             ref_logprobs=ref_logprobs
         )
-        aa: AEReturnType = self.ae(
-            rewards=rr.rewards,
-            tokens=tokens,
-            causal_mask=causal_mask,
-            position_ids=position_ids,
-            responses_pad_mask=responses_pad_mask,
+        ae_trajectory: AdvantageTrajectoryStats = self.ae(
+            rewards     = rewards,
+            tokens          = tokens,
+            causal_mask     = causal_mask,
+            position_ids    = position_ids,
+            responses_pad_mask  = responses_pad_mask,
         )
-        return ExtendedTrajectory(
-            query_responses=tokens,
-            logprobs=gen_logprobs,
-            ref_logprobs=ref_logprobs,
-            values=aa.values,
-            masks=causal_mask,
-            position_ids=position_ids,
-            response_padding_masks=responses_pad_mask,
-            scores=rr.scores,
-            kl=rr.kl,
-            kl_rewards=rr.kl_rewards,
-            advantages=aa.advantages,
-            returns=aa.returns
+        return PPOTrajectoryStats(
+            query_responses     = tokens,
+            causal_mask         = causal_mask,
+            position_ids        = position_ids,
+            responses_pad_mask  = responses_pad_mask,
+            gen_logprobs        = gen_logprobs,
+            ref_logprobs        = ref_logprobs,
+            values              = ae_trajectory.values,
+            returns             = ae_trajectory.returns,
+            advantages          = ae_trajectory.advantages,
         )
 
-    def generate_trajectory_batched(self, input_ids: torch.Tensor) -> ExtendedTrajectory:
+    def generate_trajectory_batched(self, input_ids: torch.Tensor) -> PPOTrajectoryStats:
         """
         Generates a ``self.batch_size`` batch of trajectories using `self._forward_batch_size`
         batch sizes. See ``generate_trajectory`` for more details.
@@ -519,17 +492,17 @@ class PPORecipe(FTRecipeInterface):
             input_ids (torch.Tensor): tensor of input token IDs with shape [b, seq_length]
 
         Returns:
-            Trajectory: An instance of :class:`~torchtune.rlhf.Trajectory`, comprising
-                the current trajectory.
+            PPOTrajectoryStats: An instance of :class:`ppotune.datatypes.PPOTrajectoryStats`,
+                comprising the current trajectory.
         """
-        trajectories: List[ExtendedTrajectory] = []
+        trajectories: List[PPOTrajectoryStats] = []
         with torch.no_grad():
             for batch_start in range(0, self.batch_size, self._forward_batch_size):
                 batch_input_ids = input_ids[
                     batch_start : batch_start + self._forward_batch_size
                 ]
                 trajectories.append(self.generate_trajectory(batch_input_ids))
-        return ExtendedTrajectory(*map(torch.cat, zip(*trajectories)))
+        return PPOTrajectoryStats(*map(torch.cat, zip(*trajectories)))
 
     def train(self) -> None:
         """
@@ -550,17 +523,21 @@ class PPORecipe(FTRecipeInterface):
                 # generate trajectories using:
                 # - the current policy
                 # - the current value function
-                # - the reference model (pi_theta_0)
+                # - the reference model
                 trajectory = self.generate_trajectory_batched(batch)
 
+                wandb_logger.collect_dict({
+                    "num_stop_tokens": trajectory.responses_pad_mask.any(-1).sum().float(),
+                    "response_lengths": training.get_unmasked_sequence_lengths(
+                        trajectory.responses_pad_mask
+                    ).float(),
+                })
                 # optimize with PPO objective over multiple epochs
-                ppo_stats: List[PenalizedPPOStats] = []
                 for _ in range(self._ppo_epochs):
                     batch_idxs = torch.randperm(self.batch_size, device=self._device)
                     for i in range(0, self.batch_size, self._ppo_batch_size):
                         mini_batch_idxs = batch_idxs[i : i + self._ppo_batch_size]
 
-                        batch_ppo_stats: List[PenalizedPPOStats] = []
                         for j in range(
                             0, self._ppo_batch_size, self._ppo_backward_batch_size
                         ):
@@ -568,7 +545,7 @@ class PPORecipe(FTRecipeInterface):
                                 j : j + self._ppo_backward_batch_size
                             ]
 
-                            batch_trajectory = ExtendedTrajectory(
+                            batch_trajectory = PPOTrajectoryStats(
                                 *map(
                                     partial(
                                         torch.index_select,
@@ -578,20 +555,13 @@ class PPORecipe(FTRecipeInterface):
                                     trajectory,
                                 )
                             )
-                            batch_ppo_stats.append(
-                                self.ppo_step(
-                                    batch_trajectory
-                                )
-                            )
+                            self.ppo_step(batch_trajectory)
                             del batch_trajectory
 
-                        ppo_stats.append(PenalizedPPOStats(*map(sum, zip(*batch_ppo_stats))))
-
-                        grad_logs = {
+                        wandb_logger.collect_dict({
                             **self._collect_grad_norm("policy", self._policy),
                             **self._collect_grad_norm("value", self._scorer)
-                        }
-
+                        })
                         self._optimizer.step()
                         self._optimizer.zero_grad(set_to_none=True)
 
@@ -599,15 +569,9 @@ class PPORecipe(FTRecipeInterface):
 
                 # step 5. profit
                 self._steps_run += 1
-                if self._steps_run % self._log_every_n_steps == 0:
-                    self.log_metrics(
-                        trajectory,
-                        PenalizedPPOStats(*map(torch.stack, zip(*ppo_stats))),
-                        **grad_logs
-                    )
-                self.cleanup_after_step(
-                    trajectory, ppo_stats
-                )
+                wandb_logger.flush(step=self.global_step)
+                self.cleanup_after_step(trajectory)
+
                 if self._steps_run % self._update_ref_policy_every_n_steps == 0:
                     # effectively update reference policy.
                     merge_lora_adapter(self._policy)
@@ -630,46 +594,27 @@ class PPORecipe(FTRecipeInterface):
                 )
                 return
 
-    def ppo_step(
-        self,
-        trajectory: ExtendedTrajectory,
-    ) -> PenalizedPPOStats:
+    def ppo_step(self, trajectory: PPOTrajectoryStats) -> None:
         """
-        Perform a single PPO optimisation step over a batch of trajectories
-
-        Args:
-            trajectory (Trajectory): a batch of trajectories
-
-        Returns:
-            PenalizedPPOStats: An instance of :class:`ppotune.datatypes.PenalizedPPOStats`,
-            a NamedTuple containing:
-               - loss (torch.Tensor): The total PPO loss.
-               - policy_loss (torch.Tensor): The policy function loss.
-               - value_loss (torch.Tensor): The value function loss.
-               - ratios (torch.Tensor): The ratio between the current and old policy probabilities.
-               - clipfrac (torch.Tensor): The fraction of ratios that were clipped.
-               - approx_policy_kls: Average estimated KL divergence between the policy before and
-                 after the optimisation step.
-               - kl_penalty (torch.Tensor): KL-Penalty
-
+        Perform a single PPO optimisation step over a batch of trajectories.
         """
-        queries_len = trajectory.query_responses.shape[1] - trajectory.response_padding_masks.shape[1]
+        queries_len = trajectory.query_responses.shape[1] - trajectory.responses_pad_mask.shape[1]
         # estimate logprobs from the policy at the current optimisation step
         logits = self._policy(
             trajectory.query_responses,
             input_pos=trajectory.position_ids,
-            mask=trajectory.masks,
+            mask=trajectory.causal_mask,
         )
 
         logits = logits[:, queries_len - 1 : -1]
         logprobs = rlhf.logits_to_logprobs(
             logits, trajectory.query_responses[:, queries_len:], self._temperature
         )
-        logprobs[trajectory.response_padding_masks] = 1.0
+        logprobs[trajectory.responses_pad_mask] = 1.0
 
         del logits
 
-        ratios = torch.exp(logprobs - trajectory.logprobs)
+        ratios = torch.exp(logprobs - trajectory.gen_logprobs)
         clipped_ratios = torch.clamp(ratios, 1.0 - self._epsilon, 1.0 + self._epsilon)
 
         policy_losses_clipped = -trajectory.advantages * clipped_ratios
@@ -678,23 +623,23 @@ class PPORecipe(FTRecipeInterface):
         clipfrac = (policy_losses_clipped > policy_losses_unclipped).to(
             logprobs.dtype
         )
-        clipfrac = rlhf.masked_mean(clipfrac, ~trajectory.response_padding_masks)
+        clipfrac = rlhf.masked_mean(clipfrac, ~trajectory.responses_pad_mask)
 
         policy_loss = torch.maximum(policy_losses_clipped, policy_losses_unclipped)
-        policy_loss = rlhf.masked_mean(policy_loss, ~trajectory.response_padding_masks)
+        policy_loss = rlhf.masked_mean(policy_loss, ~trajectory.responses_pad_mask)
 
         value_loss = self.ae.loss(
             tokens=trajectory.query_responses,
-            causal_mask=trajectory.masks,
+            causal_mask=trajectory.causal_mask,
             position_ids=trajectory.position_ids,
-            responses_pad_mask=trajectory.response_padding_masks,
+            responses_pad_mask=trajectory.responses_pad_mask,
             inference_values=trajectory.values,
             inference_returns=trajectory.returns
         )
         kl_penalty = self.kl(
             logprobs,
             trajectory.ref_logprobs,
-            padding_masks=~trajectory.response_padding_masks
+            padding_masks=~trajectory.responses_pad_mask
         )
 
         loss = policy_loss + value_loss + kl_penalty
@@ -703,18 +648,18 @@ class PPORecipe(FTRecipeInterface):
 
         with torch.no_grad():
             approx_policy_kls = (
-                0.5 * (logprobs - trajectory.logprobs).pow(2)
+                0.5 * (logprobs - trajectory.gen_logprobs).pow(2)
             ).mean()
 
-        return PenalizedPPOStats(
-            loss.detach(),
-            policy_loss.detach() / self._gradient_accumulation_steps,
-            value_loss.detach() / self.ae.value_coeff / self._gradient_accumulation_steps,
-            ratios.mean().detach() / self._gradient_accumulation_steps,
-            clipfrac.detach() / self._gradient_accumulation_steps,
-            approx_policy_kls / self._gradient_accumulation_steps,
-            kl_penalty.detach() / self._gradient_accumulation_steps,
-        )
+        wandb_logger.collect_dict({
+            "loss": loss.detach() * self._gradient_accumulation_steps,
+            "policy_loss": policy_loss.detach(),
+            "value_loss": value_loss.detach() / self.ae.value_coeff,
+            "ratios": ratios.mean().detach(),
+            "clipfrac": clipfrac.detach(),
+            "approx_policy_kl": approx_policy_kls,
+            "kl_penalty":  kl_penalty.detach(),
+        })
 
     def _collect_grad_norm(self, name: str, module: nn.Module) -> dict[str, torch.Tensor]:
         return {
@@ -724,38 +669,9 @@ class PPORecipe(FTRecipeInterface):
                 grad_norm([param for name, param in module.named_parameters() if "lora" not in name]),
         }
 
-    def log_metrics(
-        self,
-        trajectory: ExtendedTrajectory,
-        ppo_stats: PenalizedPPOStats,
-        **kwargs
-    ) -> None:
-        """
-        Log metrics and statistics for the current step to the metric logger.
-        """
-        log_dict = {
-            "scores": trajectory.scores.mean(),
-            "num_stop_tokens": trajectory.response_padding_masks.any(-1).sum(),
-            "rlhf_reward": trajectory.scores.mean() + trajectory.kl_rewards.sum(1).mean(),
-            "kl": trajectory.kl.sum(1).mean(),
-            "kl_reward": trajectory.kl_rewards.sum(1).mean(),
-            "kl_penalty": ppo_stats.kl_penalty.mean(),
-            "loss": ppo_stats.loss.mean(),
-            "policy_loss": ppo_stats.policy_loss.mean(),
-            "value_loss": ppo_stats.value_loss.mean(),
-            "clipfrac": ppo_stats.clipfrac.mean(),
-            "ratios": ppo_stats.ratios.mean(),
-            "approx_policy_kl": ppo_stats.approx_policy_kls.mean(),
-            "response_lengths": training.get_unmasked_sequence_lengths(trajectory.response_padding_masks).float().mean(),
-            **kwargs
-        }
-
-        self._metric_logger.log_dict(log_dict, step=self.global_step)
-
     def cleanup_after_step(
         self,
-        trajectory: ExtendedTrajectory,
-        ppo_stats: PenalizedPPOStats,
+        trajectory: PPOTrajectoryStats,
     ) -> None:
         """
         Cleanup tensors after each PPO step to free up memory.
@@ -765,12 +681,9 @@ class PPORecipe(FTRecipeInterface):
         for v in trajectory:
             del v
         del trajectory
-        for v in ppo_stats:
-            del v
-        del ppo_stats
 
     def cleanup(self, **kwargs) -> None:
-        self._metric_logger.close()
+        wandb_logger.close()
         dist.destroy_process_group()
 
 

@@ -18,12 +18,12 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run receipts/ppo.py --nproc_per_node N --config configs/mistral_7b.yaml
+#   tune run receipts/ppo.py --nproc_per_node N --config receipts/ppo/configs/mistral_7b.yaml
 #
 # You can add specific overrides through the command line. For example
 # to override the checkpointer directory while launching training
 # you can run:
-#   tune run receipts/ppo.py --nproc_per_node N --config configs/mistral_7b.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#   tune run receipts/ppo.py --nproc_per_node N --config receipts/ppo/configs/mistral_7b.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
 #
 
 # NOTE: Use full paths only. '~' would not expand.
@@ -164,7 +164,7 @@ reference_model:
 epsilon: 0.2
 
 # Logging
-wandb_logger:
+logger:
   dir: ${prefix}
   entity: RADFAN
   project: ${project}

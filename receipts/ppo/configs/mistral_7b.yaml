@@ -36,10 +36,10 @@
 prefix: /home/arqa39/.torchtune
 
 project: TLDR
-group: Base-PPO
+group: Base-PPO-Refactored
 model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
 reward: Mistral-7B-RM
-run: PPO-Refactored
+run: PPO-Logger-Refactored
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -167,7 +167,7 @@ reference_model:
 epsilon: 0.2
 
 # Logging
-wandb_logger:
+logger:
   dir: ${prefix}
   entity: RADFAN
   project: ${project}
