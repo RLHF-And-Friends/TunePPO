@@ -11,19 +11,19 @@
 #   c. (TLDR RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
 # 2. Download the policy model
 #   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ${prefix}/models/Llama-s3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Base download this to use tokenizer even if you use SFT) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
 #   c. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/llama-3.1-8B-instruct-ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/llama-3.1-8B-ppo.yaml
 #
 # You can add specific overrides through the command line. For example
 # to override the checkpointer directory while launching training
 # you can run:
-#   tune run --nproc_per_node N receipts/ppo.py --config receipts/ppo/configs/llama-3.1-8B-instruct-ppo.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#   tune run --nproc_per_node N receipts/ppo.py --config receipts/ppo/configs/llama-3.1-8B-ppo.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
 #
 
 # NOTE: Use full paths only. '~' would not expand.
@@ -37,9 +37,7 @@ prefix: /home/evgurovv/torchtune
 
 project: TLDR
 group: LLAMA-TEST
-# model: Llama3.1-8B-Instruct
 model: TLDR-Llama-3.1-8B-SmallSFT
-# reward: Llama-3.1-8B-Skywork-RM
 reward: TLDR-Llama-3.1-8B-SmallSFT-RM
 run: test
 
