@@ -1,8 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
 from typing import List
 from functools import partial
 
@@ -15,18 +10,19 @@ from ppotune.models.llama3_1._component_builders import (
 )
 
 """
-Model builders build specific instantiations using component builders. For example
-the llama3_1_8b model builder uses the llama3 component builder to create the
-Llama3.1 8B model.
+Model builders build specific instantiations using component builders. 
+For example the llama3_1_8b model builder uses the llama3 component builder 
+to create the Llama3.1 8B model.
 """
 
 
 def llama3_1_reward_8b() -> TransformerDecoder:
     """
-    Builder for creating a Llama3.1 model initialized w/ the default 8b parameter values.
+    Builder for creating a reward model based on Llama3.1 model initialized w/ 
+    the default 8b parameter values.
 
     Returns:
-        TransformerDecoder: Instantiation of Llama3.1 8B model
+        TransformerDecoder: Instantiation of Llama3.1 classifier 8B model
     """
     return llama3_1_classifier(
         num_classes=1,
@@ -54,11 +50,8 @@ def lora_llama3_1_reward_8b(
     quantize_base: bool = False,
 ) -> TransformerDecoder:
     """
-    Builder for creating a Llama3.1 8B model with LoRA enabled.
-
-    The Llama3.1 defaults are the same as in :func:`~torchtune.models.llama3_1.llama3_1_8b`,
-    while LoRA default params are based on
-    https://github.com/tloen/alpaca-lora/blob/8bb8579e403dc78e37fe81ffbb253c413007323f/finetune.py#L41-L43.
+    Builder for creating a reward model based on Llama3.1 classifier 8B model 
+    with LoRA enabled.
 
     Args:
         lora_attn_modules (List[LORA_ATTN_MODULES]): list of which linear layers
@@ -104,7 +97,8 @@ def lora_llama3_1_reward_8b(
 qlora_llama3_1_reward_8b = partial(lora_llama3_1_reward_8b, quantize_base=True)
 
 qlora_llama3_1_reward_8b.__doc__ = """
-Builder for creating a Llama3.1 8B model with QLoRA enabled. Base model weights in linear layers
-that LoRA is applied to are quantized per the QLoRA paper: https://arxiv.org/abs/2305.14314.
-Please see `lora_llama3_1_8b` for full API arguments.
+Builder for creating a Llama3.1 8B model with QLoRA enabled. Base model 
+weights in linear layers that LoRA is applied to are quantized per the 
+QLoRA paper: https://arxiv.org/abs/2305.14314. Please see `lora_llama3_1_8b` 
+for full API arguments.
 """

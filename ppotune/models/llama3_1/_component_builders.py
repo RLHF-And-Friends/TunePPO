@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 from typing import List, Optional
 
 from torch import nn
@@ -28,15 +22,17 @@ from torchtune.modules.common_utils import _register_reparametrize_state_dict_ho
 from torchtune.modules.peft import DoRALinear, LORA_ATTN_MODULES, LoRALinear
 
 """
-Component builders for the Llama3.1 model and popular variants such as LoRA.
+Component builders for the classifier model based on Llama3.1 and popular 
+variants such as LoRA.
 
 torchtune provides composable building blocks. Builder functions help
 stitch these building blocks into higher-level components. This design has
 two benefits:
-- The building blocks themselves are very flexible. For example, ``MultiHeadAttention``
-can take either nn.Linear or nn.LoRALinear for ``q_proj``.
-- Builder functions expose a set of configurable params which keep the constructors of
-the building blocks simple.
+- The building blocks themselves are very flexible. For example, 
+ ``MultiHeadAttention`` can take either nn.Linear or nn.LoRALinear for 
+ ``q_proj``.
+- Builder functions expose a set of configurable params which keep the 
+ constructors of the building blocks simple.
 """
 
 
@@ -58,13 +54,15 @@ def llama3_1_classifier(
     scale_factor: int = 8,
 ) -> TransformerDecoder:
     """
-    Build the decoder associated with the Llama3.1 model. This includes:
+    Build the decoder associated with the Llama3.1 classification model. 
+    This includes:
     - Token embeddings
     - num_layers number of TransformerSelfAttentionLayer blocks
     - RMS Norm layer applied to the output of the transformer
-    - Final projection into token space
+    - Final projection into num_classes
 
     Args:
+        num_classes (int): number of classes to predict.
         vocab_size (int): number of tokens in vocabulary.
         num_layers (int): number of layers in the transformer decoder.
         num_heads (int): number of query heads. For MHA this is also the
@@ -158,8 +156,9 @@ def lora_llama3_1_classifier(
     quantize_base: bool = False,
 ) -> TransformerDecoder:
     """
-    Return a version of Llama3.1 (an instance of :func:`~torchtune.modules.TransformerDecoder`)
-    with LoRA applied based on the passed in configuration.
+    Return a version of Llama3.1 classifier (an instance of 
+    :func:`~torchtune.modules.TransformerDecoder`) with LoRA applied based on 
+    the passed in configuration.
 
     Args:
         lora_attn_modules (List[LORA_ATTN_MODULES]): list of which linear layers
@@ -169,6 +168,7 @@ def lora_llama3_1_classifier(
             Default: False
         apply_lora_to_output (bool): whether to apply LoRA to the model's final output projection.
             Default: False
+        num_classes (int): number of classes to predict.
         vocab_size (int): number of tokens in vocabulary.
         num_layers (int): number of layers in the transformer decoder.
         num_heads (int): number of query heads. For MHA this is also the
