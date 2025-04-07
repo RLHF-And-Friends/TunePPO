@@ -7,10 +7,12 @@
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
 #   a. (Nicolinho) tune download nicolinho/QRM-Llama3.1-8B-v2 --output-dir ${prefix}/models/Llama3.1-8B-nicolinho-RM/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2  --output-dir ${prefix}/models/Llama3.1-8B-Skywork-RM/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2  --output-dir ${prefix}/models/Llama-3.1-8B-Skywork-RM/ --ignore-patterns "original/consolidated.00.pth"
+#   c. (TLDR RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
 # 2. Download the policy model
-#   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ${prefix}/models/Llama3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ${prefix}/models/Llama-s3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   c. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
@@ -36,8 +38,9 @@ prefix: /home/evgurovv/torchtune
 project: TLDR
 group: LLAMA-TEST
 # model: Llama3.1-8B-Instruct
-model: Llama3.1-8B-Base
-reward: Llama3.1-8B-Skywork-RM
+model: TLDR-Llama-3.1-8B-SmallSFT
+# reward: Llama-3.1-8B-Skywork-RM
+reward: TLDR-Llama-3.1-8B-SmallSFT-RM
 run: test
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
@@ -45,14 +48,14 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 # Tokenizer
 tokenizer:
   _component_: torchtune.models.llama3.llama3_tokenizer
-  path: ${prefix}/models/${model}/original/tokenizer.model
+  path: ${prefix}/models/Llama-3.1-8B-Base/original/tokenizer.model
   max_seq_len: 2500
 
 # Dataset
 dataset:
   _component_: torchtune.datasets.text_completion_dataset
-  # source: RLHF-And-Friends/tldr-ppo
-  source: trl-lib/tldr
+  source: RLHF-And-Friends/tldr-ppo
+  # source: trl-lib/tldr
   split: train
   column: prompt
   add_eos: False
