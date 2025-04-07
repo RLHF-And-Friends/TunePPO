@@ -18,12 +18,12 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/llama-3.1-8B-ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.1_8B_ppo.yaml
 #
 # You can add specific overrides through the command line. For example
 # to override the checkpointer directory while launching training
 # you can run:
-#   tune run --nproc_per_node N receipts/ppo.py --config receipts/ppo/configs/llama-3.1-8B-ppo.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#   tune run --nproc_per_node N receipts/ppo.py --config receipts/ppo/configs/tldr_llama_3.1_8B_ppo.yaml checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
 #
 
 # NOTE: Use full paths only. '~' would not expand.
