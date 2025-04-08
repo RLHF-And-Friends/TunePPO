@@ -502,7 +502,15 @@ class PPORecipe(FTRecipeInterface):
                     batch_start : batch_start + self._forward_batch_size
                 ]
                 trajectories.append(self.generate_trajectory(batch_input_ids))
-        return PPOTrajectoryStats(*map(torch.cat, zip(*trajectories)))
+
+        trajectory = PPOTrajectoryStats(*map(torch.cat, zip(*trajectories)))
+        wandb_logger.collect_dict({
+            "num_stop_tokens": trajectory.responses_pad_mask.any(-1).sum().float(),
+            "response_lengths": training.get_unmasked_sequence_lengths(
+                trajectory.responses_pad_mask
+            ).float(),
+        })
+        return trajectory
 
     def train(self) -> None:
         """
@@ -512,6 +520,7 @@ class PPORecipe(FTRecipeInterface):
 
         training_completed = False
         pbar = tqdm(total=self._total_steps, initial=self._steps_run)
+
         for curr_epoch in range(self._epochs_run, self._total_epochs):
             # Ensure data is not reshuffled at new epoch so the agents are
             # trained on non-overlapping data.
@@ -520,18 +529,7 @@ class PPORecipe(FTRecipeInterface):
             for _, batch in enumerate(self._dataloader):
                 batch = batch["tokens"].to(self._device)
 
-                # generate trajectories using:
-                # - the current policy
-                # - the current value function
-                # - the reference model
                 trajectory = self.generate_trajectory_batched(batch)
-
-                wandb_logger.collect_dict({
-                    "num_stop_tokens": trajectory.responses_pad_mask.any(-1).sum().float(),
-                    "response_lengths": training.get_unmasked_sequence_lengths(
-                        trajectory.responses_pad_mask
-                    ).float(),
-                })
                 # optimize with PPO objective over multiple epochs
                 for _ in range(self._ppo_epochs):
                     batch_idxs = torch.randperm(self.batch_size, device=self._device)
@@ -563,7 +561,6 @@ class PPORecipe(FTRecipeInterface):
 
                         self.global_step += 1
 
-                # step 5. profit
                 self._steps_run += 1
                 wandb_logger.flush(step=self.global_step)
                 self.cleanup_after_step(trajectory)
