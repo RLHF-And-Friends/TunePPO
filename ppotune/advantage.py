@@ -5,9 +5,12 @@ from torchtune.modules import TransformerDecoder
 
 from ppotune.datatypes import AdvantageTrajectoryStats
 from ppotune.utils import append_mask
+from ppotune.log import WandbLogger
 
 import torch
 
+
+logger = WandbLogger()
 
 class IAdvantageModel(ABC):
     """
@@ -130,6 +133,7 @@ class LLMCriticGAE(IAdvantageModel):
         )
         loss = 0.5 * rlhf.masked_mean(loss, ~value_pad_mask)
 
+        logger.collect("value_loss", loss)
         return self.value_coeff * loss
 
 
@@ -162,4 +166,6 @@ class GRAE(IAdvantageModel):
         )
 
     def loss(self, **kwargs) -> torch.Tensor:
-        return torch.tensor(0)
+        loss = torch.tensor(0.0)
+        logger.collect("value_loss", loss)
+        return loss

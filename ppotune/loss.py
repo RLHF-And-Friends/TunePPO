@@ -3,6 +3,11 @@ import torch.nn as nn
 
 from torchtune.rlhf.rewards import masked_mean
 
+from ppotune.log import WandbLogger
+
+
+logger = WandbLogger()
+
 class KLPenalty(nn.Module):
     """
     KL-Penalty module. Provides KL approximation of log probabilities batch
@@ -21,5 +26,7 @@ class KLPenalty(nn.Module):
         """
         Computes coeff * KL(lhs | rhs)
         """
-        kl = torch.exp(rhs_logprobs - lhs_logprobs) - (rhs_logprobs - lhs_logprobs) - 1
-        return self._coeff * masked_mean(kl, padding_masks)
+        per_token_kl = torch.exp(rhs_logprobs - lhs_logprobs) - (rhs_logprobs - lhs_logprobs) - 1
+        kl_penalty = self._coeff * masked_mean(per_token_kl, padding_masks)
+        logger.collect("kl_penalty", kl_penalty)
+        return kl_penalty

@@ -167,7 +167,7 @@ reference_model:
 epsilon: 0.2
 
 # Logging
-logger:
+wandb_logger:
   dir: ${prefix}
   entity: RADFAN
   project: ${project}

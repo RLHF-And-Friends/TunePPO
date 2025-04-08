@@ -59,6 +59,7 @@ class WandbLogger(MetricLoggerInterface):
         """
         Collect log in logger buffer to aggregate and offload to wandb later.
         """
+        data = data.detach()
         if name in self._log_buffer:
             self._log_buffer[name].append(data)
         else:

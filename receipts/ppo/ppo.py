@@ -148,7 +148,7 @@ class PPORecipe(FTRecipeInterface):
         Sets up the recipe state correctly.
         """
         # setup logger
-        wandb_logger.setup(cfg.logger)
+        wandb_logger.setup(cfg.wandb_logger)
         wandb_logger.log_config(cfg)
 
         # setup checkpointers
@@ -652,13 +652,11 @@ class PPORecipe(FTRecipeInterface):
             ).mean()
 
         wandb_logger.collect_dict({
-            "loss": loss.detach() * self._gradient_accumulation_steps,
-            "policy_loss": policy_loss.detach(),
-            "value_loss": value_loss.detach() / self.ae.value_coeff,
-            "ratios": ratios.mean().detach(),
-            "clipfrac": clipfrac.detach(),
+            "loss": loss * self._gradient_accumulation_steps,
+            "policy_loss": policy_loss,
+            "ratios": ratios.mean(),
+            "clipfrac": clipfrac,
             "approx_policy_kl": approx_policy_kls,
-            "kl_penalty":  kl_penalty.detach(),
         })
 
     def _collect_grad_norm(self, name: str, module: nn.Module) -> dict[str, torch.Tensor]:
