@@ -3,11 +3,14 @@ from abc import ABC, abstractmethod
 from torchtune import rlhf
 from torchtune.modules import TransformerDecoder
 
-from ppotune.datatypes import AEReturnType
+from ppotune.datatypes import AdvantageTrajectoryStats
 from ppotune.utils import append_mask
+from ppotune.log import WandbLogger
 
 import torch
 
+
+logger = WandbLogger()
 
 class IAdvantageModel(ABC):
     """
@@ -17,7 +20,7 @@ class IAdvantageModel(ABC):
     def __call__(
         self,
         rewards: torch.Tensor # B or B x R
-    ) -> AEReturnType:
+    ) -> AdvantageTrajectoryStats:
         ...
 
     @abstractmethod
@@ -75,7 +78,7 @@ class LLMCriticGAE(IAdvantageModel):
         causal_mask:        torch.Tensor, # B x (Q + R) x (Q + R)
         position_ids:       torch.Tensor, # B x (Q + R)
         responses_pad_mask: torch.Tensor, # B x R
-    ) -> AEReturnType:
+    ) -> AdvantageTrajectoryStats:
         """
         Get advantage estimation
         """
@@ -95,7 +98,7 @@ class LLMCriticGAE(IAdvantageModel):
             self.lmbda,
             masks=~responses_pad_mask
         )
-        return AEReturnType(
+        return AdvantageTrajectoryStats(
             advantages=advantages,
             values=values,
             returns=returns
@@ -130,6 +133,7 @@ class LLMCriticGAE(IAdvantageModel):
         )
         loss = 0.5 * rlhf.masked_mean(loss, ~value_pad_mask)
 
+        logger.collect("value_loss", loss)
         return self.value_coeff * loss
 
 
@@ -145,7 +149,7 @@ class GRAE(IAdvantageModel):
     def __call__(self,
         rewards: torch.Tensor, # B
         **kwargs
-    ) -> AEReturnType:
+    ) -> AdvantageTrajectoryStats:
         """
         Get advantage estimation
         """
@@ -155,11 +159,13 @@ class GRAE(IAdvantageModel):
         )
         advantages = advantages.flatten().unsqueeze(-1)
 
-        return AEReturnType(
+        return AdvantageTrajectoryStats(
             advantages=advantages,
             values=torch.zeros_like(advantages), # irrelevant
             returns=torch.zeros_like(advantages) # irrelevant
         )
 
     def loss(self, **kwargs) -> torch.Tensor:
-        return torch.tensor(0)
+        loss = torch.tensor(0.0)
+        logger.collect("value_loss", loss)
+        return loss

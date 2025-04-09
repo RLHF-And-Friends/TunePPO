@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B-Instruct model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,13 +6,10 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (Nicolinho) tune download nicolinho/QRM-Llama3.1-8B-v2 --output-dir ${prefix}/models/Llama3.1-8B-nicolinho-RM/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2  --output-dir ${prefix}/models/Llama-3.1-8B-Skywork-RM/ --ignore-patterns "original/consolidated.00.pth"
-#   c. (TLDR RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
+#   a. (TLDR RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
 # 2. Download the policy model
-#   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ${prefix}/models/Llama-s3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Base download this to use tokenizer even if you use SFT) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
-#   c. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT/
+#   a. (Base download this to use tokenizer even if you use SFT) tune download meta-llama/Llama-3.1-8B --output-dir ${prefix}/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ${prefix}/models/TLDR-Llama-3.1-8B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.

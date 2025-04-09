@@ -5,11 +5,13 @@ from torchtune.modules.peft import disable_adapter
 from torchtune.training import get_unmasked_sequence_lengths
 from torchtune.rlhf import get_reward_penalty_mask, get_rewards_ppo
 
-from ppotune.datatypes import RMReturnType
+from ppotune.log import WandbLogger
 from ppotune.utils import append_mask
 
 import torch
 
+
+logger = WandbLogger()
 
 class IRewardModel(ABC):
     """
@@ -21,7 +23,7 @@ class IRewardModel(ABC):
         tokens:             torch.Tensor, # B x (Q + R)
         responses_pad_mask: torch.Tensor, # B x R
         **kwargs
-    ) -> RMReturnType: # B or B x R
+    ) -> torch.Tensor: # B or B x R
         ...
 
 
@@ -50,7 +52,7 @@ class LLMRewardModel(IRewardModel):
         position_ids:       torch.Tensor, # B x (Q + R)
         responses_pad_mask: torch.Tensor, # B x R
         **kwargs,
-    ) -> RMReturnType: # B
+    ) -> torch.Tensor: # B
 
         queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
 
@@ -75,12 +77,8 @@ class LLMRewardModel(IRewardModel):
         )
         scores[reward_penalty_mask] = self.reward_penalty
 
-        return RMReturnType(
-            scores=scores,
-            rewards=scores,
-            kl=torch.zeros_like(scores).unsqueeze(-1), # irrelevant
-            kl_rewards=torch.zeros_like(scores).unsqueeze(-1) # irrelevant
-        )
+        logger.collect("scores", scores)
+        return scores
 
 
 class PerTokenKLPenalizedRewardModel(LLMRewardModel):
@@ -120,7 +118,7 @@ class PerTokenKLPenalizedRewardModel(LLMRewardModel):
             causal_mask,
             position_ids,
             responses_pad_mask
-        ).scores
+        )
         mask_after_eos = append_mask(responses_pad_mask)
         pos_after_eos = get_unmasked_sequence_lengths(mask_after_eos)
 
@@ -131,9 +129,9 @@ class PerTokenKLPenalizedRewardModel(LLMRewardModel):
             self.kl_coeff,
             pos_after_eos
         )
-        return RMReturnType(
-            scores=scores,
-            rewards=rewards,
-            kl=kl,
-            kl_rewards=kl_rewards
-        )
+        logger.collect_dict({
+            "rlhf_reward": scores + kl_rewards.sum(1),
+            "kl": kl.sum(1),
+            "kl_reward": kl_rewards.sum(1),
+        })
+        return rewards
