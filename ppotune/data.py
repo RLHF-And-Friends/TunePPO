@@ -5,7 +5,7 @@ from datasets import load_dataset
 import torch
 from torch.utils.data import Dataset
 
-from torchtune.data import Message, left_pad_sequence
+from torchtune.data import Message, left_pad_sequence, truncate
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.transforms import Transform
 
@@ -120,7 +120,26 @@ class QADataset(Dataset):
                 eot=True,
             ),
         ]
-        tokens = self.tokenizer.tokenize_messages(messages)[0]
+
+        max_seq_len = self.tokenizer.max_seq_len
+        tokens = [self.tokenizer.bos_id]
+        for message in messages:
+            tokenized_message = self.tokenizer.tokenize_message(
+                message, add_end_tokens=False
+            )
+            tokens = tokens + tokenized_message
+            if max_seq_len and len(tokens) >= max_seq_len:
+                break
+
+        generation_prompt = self.tokenizer._tokenize_header(Message(
+            role="assistant", content=""
+        ))
+        tokens = tokens + generation_prompt
+
+        if max_seq_len:
+            tokens = truncate(
+                tokens, max_seq_len
+            )
         return {"tokens": tokens, "answers": answer}
 
 
