@@ -46,7 +46,7 @@ from ppotune.peft import (
     clear_lora_adapter,
 )
 from ppotune.reward import IRewardModel
-from ppotune.utils import grad_norm
+from ppotune.utils import grad_norm, liststrip
 
 log = utils.get_logger("DEBUG")
 wandb_logger = WandbLogger()
@@ -458,6 +458,13 @@ class PPORecipe(FTRecipeInterface):
             position_ids    = position_ids,
             responses_pad_mask  = responses_pad_mask,
         )
+
+        sample_completion = self.prettify_completion(
+            tokens[0].clone(), responses_pad_mask[0]
+        )
+        wandb_logger.collect_completion(
+            sample_completion, rewards[0].sum()
+        )
         return PPOTrajectoryStats(
             query_responses     = tokens,
             causal_mask         = causal_mask,
@@ -649,6 +656,28 @@ class PPORecipe(FTRecipeInterface):
             f"{name}_base_grad_norm":
                 grad_norm([param for name, param in module.named_parameters() if "lora" not in name]),
         }
+
+    def prettify_completion(
+        self,
+        tokens: torch.Tensor, # Q + R
+        response_pad_mask: torch.Tensor # R
+    ) -> str:
+        """
+        Make it clean!
+        """
+        query_len = tokens.shape[0] - response_pad_mask.shape[0]
+        query, response = tokens[:query_len], tokens[query_len:]
+
+        response[response_pad_mask] = self._tokenizer.pad_id
+        query_response = torch.cat([query, response]).tolist()
+        completion_tokens = liststrip(query_response, self._tokenizer.pad_id)
+
+        completion=self._tokenizer.decode(
+            completion_tokens,
+            skip_special_tokens=False,
+            truncate_at_eos=False
+        )
+        return completion
 
     def cleanup_after_step(
         self,

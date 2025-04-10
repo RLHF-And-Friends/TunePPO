@@ -32,3 +32,15 @@ def append_mask(mask: torch.Tensor) -> torch.Tensor: # B x S -> B x S
         1, after_last_pos.unsqueeze(-1), False
     ) # unmask last entry
     return appended_mask
+
+
+def liststrip(lst: list, element: tp.Any) -> list:
+    start = 0
+    while start < len(lst) and lst[start] == element:
+        start += 1
+
+    end = len(lst)
+    while end > start and lst[end - 1] == element:
+        end -= 1
+
+    return lst[start:end]

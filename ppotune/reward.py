@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-from typing import Any
-
 from torchtune.modules import TransformerDecoder
 from torchtune.modules.peft import disable_adapter
 from torchtune.modules.tokenizers import ModelTokenizer
@@ -16,25 +14,13 @@ from xml.etree import ElementTree
 
 import torch
 
+
 logger = WandbLogger()
-
-def liststrip(lst: list, element: Any) -> list:
-    start = 0
-    while start < len(lst) and lst[start] == element:
-        start += 1
-
-    end = len(lst)
-    while end > start and lst[end - 1] == element:
-        end -= 1
-
-    return lst[start:end]
-
 
 class IRewardModel(ABC):
     """
     Abstract Reward Model Interface
     """
-
     @abstractmethod
     def __call__(
         self,
@@ -181,7 +167,6 @@ class DeepSeekMathRewardModel(IRewardModel):
 
         batch_size = tokens.shape[0]
         queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
-        query_tokens = tokens[:, :queries_len]
         response_tokens = tokens[:, queries_len:].clone()
         response_tokens[responses_pad_mask] = self.tokenizer.pad_id
 
@@ -195,41 +180,11 @@ class DeepSeekMathRewardModel(IRewardModel):
                 answer=answer, completion=response
             )
 
-        self.log_samples(
-            torch.cat([query_tokens, response_tokens], dim=1),
-            scores, successes, batch["answers"]
-        )
         logger.collect_dict({
             "success_rate": successes,
             "scores": scores
         })
         return scores
-
-    def log_samples(
-        self,
-        tokens: torch.Tensor,
-        scores: torch.Tensor,
-        successes: torch.Tensor,
-        answers: list
-    ) -> None:
-
-        samples = [
-            self.tokenizer.decode(
-                liststrip(tokens[i].tolist(), self.tokenizer.pad_id),
-                skip_special_tokens=False,
-                truncate_at_eos=False
-            )
-            for i in range(self.num_logs)
-        ]
-        data = [
-            [samples[i], f"{scores[i]:.2f}", f"{successes[i]:.2f}", answers[i]]
-            for i in range(self.num_logs)
-        ]
-        logger.log_table(
-            name    = "model output",
-            columns = ["text", "score", "success", "answer"],
-            data    = data
-        )
 
     @staticmethod
     def shaped_correctness_reward(answer: str, completion: str) -> tuple[float, float]:
@@ -248,9 +203,7 @@ class DeepSeekMathRewardModel(IRewardModel):
         success = 0.0
 
         try:
-            tags = DeepSeekMathRewardModel.extract_tags(
-                "<think>" + completion.replace("<<", "").replace(">>", "")
-            )
+            tags = DeepSeekMathRewardModel.extract_tags(completion)
         except ElementTree.ParseError:
             tags = {"think": [], "answer": []}
 
@@ -282,13 +235,11 @@ class DeepSeekMathRewardModel(IRewardModel):
         """
         xml_string = f"<root>{text}</root>"
         root = ElementTree.fromstring(xml_string)
-
         return {
             "think": [
                 elem.text if elem.text is not None else "" for elem in root.findall("think")
             ],
             "answer": [
-                elem.text if elem.text is not None else ""
-                for elem in root.findall("answer")
+                elem.text if elem.text is not None else "" for elem in root.findall("answer")
             ],
         }

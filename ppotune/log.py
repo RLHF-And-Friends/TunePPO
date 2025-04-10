@@ -32,7 +32,9 @@ class WandbLogger(MetricLoggerInterface):
             os.makedirs(config.dir)
 
         self._log_buffer: tp.Dict[str, list[torch.Tensor]] = {}
-
+        self._completions = wandb.Table(
+            columns=["completion", "score"]
+        )
         wandb.init(
             dir=config.dir,
             entity=config.entity,
@@ -55,12 +57,6 @@ class WandbLogger(MetricLoggerInterface):
         resolved = OmegaConf.to_container(config, resolve=True)
         wandb.config.update(resolved)
 
-    def log_table(
-        self, name: str, columns: list[str], data: list[list[str]]
-    ) -> None:
-        table = wandb.Table(columns=columns, data=data)
-        wandb.log({name: table})
-
     def collect(self, name: str, data: torch.Tensor) -> None:
         """
         Collect log in logger buffer to aggregate and offload to wandb later.
@@ -78,6 +74,12 @@ class WandbLogger(MetricLoggerInterface):
         for name in payload:
             self.collect(name, payload[name])
 
+    def collect_completion(self, completion: str, score: torch.Tensor) -> None:
+        """
+        Collect completion and score.
+        """
+        self._completions.add_data(completion, score)
+
     def flush(self, step: int) -> None:
         """
         Flush the log buffer to wandb.
@@ -86,6 +88,8 @@ class WandbLogger(MetricLoggerInterface):
             self.log(name, torch.stack(self._log_buffer[name]).mean(), step)
 
         self._log_buffer = {}
+        self.log("completion table", self._completions, step)
+        self._completions = wandb.Table(columns=["completion", "score"])
 
     def close(self) -> None:
         wandb.finish()
