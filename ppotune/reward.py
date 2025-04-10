@@ -2,14 +2,17 @@ from abc import ABC, abstractmethod
 
 from torchtune.modules import TransformerDecoder
 from torchtune.modules.peft import disable_adapter
+from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.training import get_unmasked_sequence_lengths
 from torchtune.rlhf import get_reward_penalty_mask, get_rewards_ppo
+
 
 from ppotune.log import WandbLogger
 from ppotune.utils import append_mask
 
-import torch
+from xml.etree import ElementTree
 
+import torch
 
 logger = WandbLogger()
 
@@ -135,3 +138,137 @@ class PerTokenKLPenalizedRewardModel(LLMRewardModel):
             "kl_reward": kl_rewards.sum(1),
         })
         return rewards
+
+
+class DeepSeekMathRewardModel(IRewardModel):
+    """
+    Rule-Based Reward Model as in DeepSeekMath.
+    """
+    def __init__(
+        self,
+        tokenizer: ModelTokenizer,
+        num_logs: int = 1,
+        **kwargs,
+    ) -> None:
+        self.tokenizer = tokenizer
+        self.num_logs = num_logs
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        tokens:             torch.Tensor, # B x (Q + R)
+        causal_mask:        torch.Tensor, # B x (Q + R) x (Q + R)
+        position_ids:       torch.Tensor, # B x (Q + R)
+        responses_pad_mask: torch.Tensor, # B x R
+        batch:              dict,
+        **kwargs,
+    ) -> torch.Tensor: # B
+
+        batch_size = tokens.shape[0]
+        queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
+        response_tokens = tokens[:, queries_len:]
+
+        scores = torch.zeros_like(tokens[:,0], dtype=torch.float32)
+        successes = torch.zeros_like(tokens[:,0], dtype=torch.float32)
+
+        for i in range(batch_size):
+            response = self.tokenizer.decode(response_tokens[i].tolist())
+            answer = batch["answers"][i]
+            scores[i], successes[i] = self.shaped_correctness_reward(
+                answer=answer, completion=response
+            )
+
+        self.log_samples(tokens, scores, successes, batch["answers"])
+        logger.collect_dict({
+            "success_rate": successes,
+            "scores": scores
+        })
+        return scores
+
+    def log_samples(
+        self,
+        tokens: torch.Tensor,
+        scores: torch.Tensor,
+        successes: torch.Tensor,
+        answers: list
+    ) -> None:
+
+        samples = [
+            self.tokenizer.decode(
+                tokens[i].tolist(),
+                skip_special_tokens=False,
+                truncate_at_eos=False
+            )
+            for i in range(self.num_logs)
+        ]
+        data = [
+            [samples[i], f"{scores[i]:.2f}", f"{successes[i]:.2f}", answers[i]]
+            for i in range(self.num_logs)
+        ]
+        logger.log_table(
+            name    = "model output",
+            columns = ["text", "score", "success", "answer"],
+            data    = data
+        )
+
+    @staticmethod
+    def shaped_correctness_reward(answer: str, completion: str) -> tuple[float, float]:
+        """
+        Reward function for verifiable rewards with some mild shaping.
+
+        Args:
+            answer (str): ground-truth answer to the current problem
+            completion (str): model's completion, starting immediately after "Assistant: <think>"
+        Returns:
+            reward: (float) a shaped reward indicating the correct answer and the correct format
+            success: (float) a binary measure of success (1 if the answer is correct and correctly
+                formatted, 0 otherwise)
+        """
+        reward = 0.0
+        success = 0.0
+
+        try:
+            tags = DeepSeekMathRewardModel.extract_tags(
+                "<think>" + completion.replace("<<", "").replace(">>", "")
+            )
+        except ElementTree.ParseError:
+            tags = {"think": [], "answer": []}
+
+        if len(tags["answer"]) == 1:
+            reward += 5.0
+
+        if len(tags["think"]) == 1:
+            reward += 5.0
+
+        if any(attempt == answer for attempt in tags["answer"]):
+            # One of the answer tags has the right answer
+            reward += 20.0
+
+        if any((answer in attempt) for attempt in tags["answer"]):
+            # One of the answer tags contains the right answer (might be e.g. $20 instead of 20)
+            reward += 10.0
+
+        if len(tags["answer"]) > 0 and tags["answer"][-1] == answer:
+            reward = 100.0
+            success = 1
+
+        return reward, success
+
+    @staticmethod
+    def extract_tags(text: str) -> dict[str, list[str]]:
+        """
+        Parse XML-like tags from text. Returns a dictionary with keys 'think' and 'answer'.
+        The values are lists of strings, with each string being the content of a tag.
+        """
+        xml_string = f"<root>{text}</root>"
+        root = ElementTree.fromstring(xml_string)
+
+        return {
+            "think": [
+                elem.text if elem.text is not None else "" for elem in root.findall("think")
+            ],
+            "answer": [
+                elem.text if elem.text is not None else ""
+                for elem in root.findall("answer")
+            ],
+        }
