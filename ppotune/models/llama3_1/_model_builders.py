@@ -1,13 +1,19 @@
-from typing import List
+from typing import List, Optional
 from functools import partial
+
+import torchtune.models.llama3
 
 from torchtune.modules import TransformerDecoder
 from torchtune.modules.peft import LORA_ATTN_MODULES
+from torchtune.data._prompt_templates import _get_prompt_template, _TemplateType
 
 from ppotune.models.llama3_1._component_builders import (
     llama3_1_classifier,
     lora_llama3_1_classifier
 )
+
+from torchtune.models.llama3._tokenizer import Llama3Tokenizer
+
 
 """
 Model builders build specific instantiations using component builders. 
@@ -102,3 +108,44 @@ weights in linear layers that LoRA is applied to are quantized per the
 QLoRA paper: https://arxiv.org/abs/2305.14314. Please see `lora_llama3_1_8b` 
 for full API arguments.
 """
+
+
+def llama3_tokenizer(
+    path: str,
+    special_tokens_path: Optional[str] = None,
+    max_seq_len: Optional[int] = None,
+    prompt_template: Optional[_TemplateType] = None,
+    truncation_type: str = "right",
+) -> Llama3Tokenizer:
+    """
+    Tokenizer for Llama3 with modified eos_id (for instruct models)
+
+    Args:
+        path (str): path to the tokenizer
+        special_tokens_path (Optional[str]): Path to ``tokenizer.json`` from Hugging Face
+            model files that contains all registered special tokens, or a local json file
+            structured similarly. Default is None to use the canonical Llama3 special tokens.
+        max_seq_len (Optional[int]): maximum sequence length for tokenizing a single list of messages,
+            after which the input will be truncated. Default is None.
+        prompt_template (Optional[_TemplateType]): optional specified prompt template.
+            If a string, it is assumed to be the dotpath of a :class:`~torchtune.data.PromptTemplateInterface`
+            class. If a dictionary, it is assumed to be a custom prompt template mapping role to the
+            prepend/append tags.
+        truncation_type (str): type of truncation to apply, either "left" or "right".
+            Default is "right".
+
+    Returns:
+        Llama3Tokenizer: Instantiation of the Llama3 tokenizer
+    """
+
+    tokenizer: Llama3Tokenizer = torchtune.models.llama3.llama3_tokenizer(
+        path=path,
+        special_tokens_path=special_tokens_path,
+        max_seq_len=max_seq_len,
+        prompt_template=prompt_template,
+        truncation_type=truncation_type
+    )
+
+    tokenizer.eos_id = 128009 # "<|eot_id|>": 128009
+
+    return tokenizer

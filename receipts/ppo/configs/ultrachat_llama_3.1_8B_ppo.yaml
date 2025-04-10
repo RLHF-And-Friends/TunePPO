@@ -41,17 +41,18 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 # Tokenizer
 tokenizer:
-  _component_: torchtune.models.llama3.llama3_tokenizer
+  _component_: ppotune.models.llama3_1.llama3_tokenizer
   path: ${prefix}/models/${model}/original/tokenizer.model
   max_seq_len: 2500
 
 # Dataset
 dataset:
-  _component_: torchtune.datasets.text_completion_dataset
+  _component_: ppotune.datasets.text_completion_dataset
   source: RLHF-And-Friends/ultrachat-preprocessed
   split: train_gen
   column: prompt
   add_eos: False
+  add_bos: False
 
 # Policy / Reference Policy when adapter disabled
 policy:
@@ -127,7 +128,7 @@ dtype: bf16 # | fp32 | fp16 is not supported
 
 # batch size for forward pass during generation
 forward_batch_size: 8
-max_generated_tokens: 2000
+max_generated_tokens: 1000
 temperature: 0.7
 top_k: null
 

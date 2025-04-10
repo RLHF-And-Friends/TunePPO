@@ -421,6 +421,12 @@ class PPORecipe(FTRecipeInterface):
                 rng=self._rng,
             )
 
+        # print(self._tokenizer.decode(
+        #     tokens[0].tolist(),
+        #     skip_special_tokens=False,
+        #     truncate_at_eos = False
+        # ))
+
         tokens_pad_mask = tokens != self._tokenizer.pad_id
 
         responses = tokens[:, query_len:]
