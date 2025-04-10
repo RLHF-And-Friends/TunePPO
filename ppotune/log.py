@@ -55,6 +55,12 @@ class WandbLogger(MetricLoggerInterface):
         resolved = OmegaConf.to_container(config, resolve=True)
         wandb.config.update(resolved)
 
+    def log_table(
+        self, name: str, columns: list[str], data: list[list[str]]
+    ) -> None:
+        table = wandb.Table(columns=columns, data=data)
+        wandb.log({name: table})
+
     def collect(self, name: str, data: torch.Tensor) -> None:
         """
         Collect log in logger buffer to aggregate and offload to wandb later.
