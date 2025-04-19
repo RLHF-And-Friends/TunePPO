@@ -6,7 +6,8 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (TLDR-RM) tune download RLHF-And-Friends/RM-TLDR-Mistral-7B-v0.2 --output-dir ${prefix}/models/Mistral-7B-RM/
+#   a. (TLDR-RM) tune download RLHF-And-Friends/TLDR-Mistral-7B-RM --output-dir ${prefix}/models/TLDR-Mistral-7B-RM/
+#   b. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Mistral-7B-SmallSFT-RM --output-dir ${prefix}/models/TLDR-Mistral-7B-SmallSFT-RM/
 # 2. Get Mistral-7B model
 #   a. (Base) tune download mistral-community/Mistral-7B-v0.2 --output-dir ${prefix}/models/Mistral-7B-Base/
 #   b. (Instruct) tune download mistralai/Mistral-7B-Instruct-v0.2 --output-dir ${prefix}/models/Mistral-7B-Instruct/
@@ -19,6 +20,9 @@
 # To launch on N devices (starting from 1), run the following command from repo root:
 #   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_mistral_7b_ppo.yaml
 #
+# To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
+# export OPENAI_API_KEY=<your API key>.
+# Use this variable even if you use deepinfra.
 
 # NOTE: Use full paths only. '~' would not expand.
 # NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
@@ -26,30 +30,42 @@
 
 
 # Change those to your preference. Do not do that via CLI!
-prefix: /home/optteam/.tune
+prefix: /home/evgurovv/torchtune
 
 project: TLDR
-group: Base-PPO
+group: Mistral-Base-PPO
 model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
-reward: Mistral-7B-RM
-run: PPO
+reward: TLDR-Mistral-7B-SmallSFT-RM # | TLDR-Mistral-7B-RM
+run: PPO-Eval
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 # Tokenizer
 tokenizer:
-  _component_: torchtune.models.mistral.mistral_tokenizer
+  _component_: ppotune.tokenizers.mistral2_tokenizer
   path: ${prefix}/models/${model}/tokenizer.model
   max_seq_len: 2500
 
 # Dataset
 dataset:
-  _component_: torchtune.datasets.text_completion_dataset
-  # source: RLHF-And-Friends/tldr-ppo
-  source: trl-lib/tldr
+  _component_: ppotune.datasets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
   split: train
-  column: prompt
-  add_eos: False
+
+evaluation_dataset:
+  _component_: ppotune.datasets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
+  split: validation
+
+# Evaluator
+evaluator:
+  _component_: ppotune.evaluation.reference_completion_evaluator
+  arbiter:
+    _component_: ppotune.arbiters.tldr_arbiter
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  num_samples: 128 # better be divisible by forward_batch_size
+  every_n_steps: 13
 
 # Batch parameters
 batch_size: 64
@@ -64,8 +80,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_seq_len: ${tokenizer.max_seq_len}
-  max_generated_tokens: 58
+  max_response_len: 58
   temperature: 0.7
   top_k: null
   model:

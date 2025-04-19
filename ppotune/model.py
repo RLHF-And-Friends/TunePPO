@@ -1,7 +1,9 @@
 from omegaconf import DictConfig
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import typing as tp
 
 from torchtune.training import (
@@ -18,12 +20,29 @@ from torchtune.modules.peft import (
     get_adapter_params,
     set_trainable_params,
 )
+from torchtune.modules.transforms.tokenizers import ModelTokenizer
 from torchtune import generation
 from torchtune import utils
 from ppotune.peft import (
     get_merged_adapter_state_dict,
     get_adapter_config
 )
+
+
+@dataclass
+class GenerationResult:
+    tokens:         torch.IntTensor     # B x (Q + R)
+    query_mask:     torch.BoolTensor    # B x (Q + R)
+    response_mask:  torch.BoolTensor    # B x (Q + R)
+    logits:         torch.FloatTensor   # B x R x V
+
+
+class GenerativeModel(tp.Protocol):
+    """
+    A model that can generate response to a prompt
+    """
+    def generate(self, prompt: torch.Tensor) -> GenerationResult:
+        ...
 
 
 class LoRAModel(nn.Module):
@@ -74,52 +93,101 @@ class LoRAModel(nn.Module):
             epoch=epoch
         )
 
-class GenerativeLoRAModel(LoRAModel):
+
+class GenerativeLoRAModel(LoRAModel, GenerativeModel):
     def __init__(
         self,
         ckpt: Checkpointer,
         model: TransformerDecoder,
-        max_seq_len: int,
-        max_generated_tokens: int,
+        tokenizer: ModelTokenizer,
+        max_response_len: int,
         generation_batch_size: int,
         temperature: float,
         top_k: tp.Optional[int] = None,
-        pad_id: int = 0,
         rng: tp.Optional[torch.Generator] = None,
     ) -> None:
 
         super().__init__(ckpt, model)
-        self._max_seq_len = max_seq_len
-        self._max_generated_tokens = max_generated_tokens
+        self._tokenizer = tokenizer
+        self._max_response_len = max_response_len
         self._generation_batch_size = generation_batch_size
         self._temperature = temperature
         self._top_k = top_k
-        self._pad_id = pad_id
         self._rng = rng
 
-    def setup(self, cfg: DictConfig) -> None:
+    @property
+    def max_query_len(self) -> int:
+        return self._tokenizer.max_seq_len
 
+    @property
+    def max_response_len(self) -> int:
+        return self._max_response_len
+
+    @property
+    def batch_size(self) -> int:
+        return self._generation_batch_size
+
+    @property
+    def temperature(self) -> float:
+        return self._temperature
+
+    def setup(self, cfg: DictConfig) -> None:
         super().setup(cfg)
         self.cache_ctx_manager = lambda: local_kv_cache(
             self.model,
-            batch_size=self._generation_batch_size,
+            batch_size=self.batch_size,
             dtype=self._dtype,
-            decoder_max_seq_len=self._max_seq_len + self._max_generated_tokens,
+            decoder_max_seq_len=self.max_query_len + self.max_response_len,
             device=self._device
         )
 
-    def generate(
-        self, prompt: torch.Tensor
-    ) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-
+    def generate(self, prompt: torch.Tensor) -> GenerationResult:
         with self.cache_ctx_manager():
             tokens, logits = generation.generate(
                 model=self.model,
                 prompt=prompt,
-                max_generated_tokens=self._max_generated_tokens,
+                max_generated_tokens=self.max_response_len,
                 temperature=self._temperature,
                 top_k=self._top_k,
-                pad_id=self._pad_id,
+                pad_id=self._tokenizer.pad_id,
                 rng=self._rng,
             )
-        return tokens, logits
+
+        query_len = prompt.shape[1]
+        query_mask = tokens != self._tokenizer.pad_id
+        query_mask[:, query_len:] = False # mask out responses
+
+        responses = tokens[:, query_len:]
+        eos_mask = (responses == self._tokenizer.eos_id)
+        seen_eos = torch.cumsum(eos_mask, dim=1)
+        responses_pad_mask = (seen_eos > 1) | ((seen_eos == 1) & ~eos_mask)
+
+        response_mask = query_mask.clone()
+        response_mask[:, :query_len] = False # mask out queries
+        response_mask[:, query_len:] = ~responses_pad_mask
+
+        return GenerationResult(
+            tokens=tokens,
+            query_mask=query_mask,
+            response_mask=response_mask,
+            logits=logits
+        )
+
+    def logits_to_logprobs(
+        self,
+        logits: torch.Tensor,
+        tokens: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Converts logits corresponding to a generated token sequence to logprobs
+        Args:
+            logits (torch.Tensor): B x L x V - logits
+            tokens (torch.Tensor): B x L - corresponding tokens
+        Returns:
+            torch.Tensor: B x L - log probs corresponding to each token.
+        """
+        return torch.gather(
+            F.log_softmax(logits / self.temperature, dim=-1),
+            2,
+            tokens.unsqueeze(-1),
+        ).squeeze(-1)

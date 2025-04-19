@@ -53,6 +53,14 @@ class Mistral2Tokenizer(DefaultMistralTokenizer):
         )
         return tokens
 
+    def decode(
+        self,
+        token_ids: tp.List[int],
+        skip_special_tokens: bool = False, # not usable. compatibility purpose.
+    ) -> str:
+        return super().decode(token_ids)
+
+
 def mistral2_tokenizer(
     path: str,
     max_seq_len: tp.Optional[int] = None,

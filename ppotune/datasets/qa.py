@@ -79,5 +79,6 @@ class QADataset(Dataset):
                 add_generation_prompt=True
             )
             tokens = self.tokenizer.encode(text, add_eos=False)
+            tokens = tokens[:self.tokenizer.max_seq_len]
 
         return {"tokens": tokens, "answers": answer}

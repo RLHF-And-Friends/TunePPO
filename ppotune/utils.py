@@ -1,11 +1,6 @@
 import typing as tp
 import torch
 
-from transformers import PreTrainedTokenizerBase
-
-from torchtune.modules.transforms.tokenizers import ModelTokenizer
-from torchtune.models.llama3 import Llama3Tokenizer
-from torchtune.models.mistral import MistralTokenizer
 from torchtune.training import get_unmasked_sequence_lengths
 
 
@@ -37,47 +32,3 @@ def append_mask(mask: torch.Tensor) -> torch.Tensor: # B x S -> B x S
         1, after_last_pos.unsqueeze(-1), False
     ) # unmask last entry
     return appended_mask
-
-def liststrip(lst: list, element: tp.Any) -> list:
-    start = 0
-    while start < len(lst) and lst[start] == element:
-        start += 1
-
-    end = len(lst)
-    while end > start and lst[end - 1] == element:
-        end -= 1
-
-    return lst[start:end]
-
-def pretty_decode(
-    tokenizer: ModelTokenizer,
-    tokens: torch.Tensor, # Q + R
-    response_pad_mask: torch.Tensor # R
-) -> str:
-    """
-    Make it clean!
-    """
-    query_len = tokens.shape[0] - response_pad_mask.shape[0]
-    query, response = tokens[:query_len], tokens[query_len:]
-
-    response[response_pad_mask] = tokenizer.pad_id
-    query_response = torch.cat([query, response]).tolist()
-    completion_tokens = liststrip(query_response, tokenizer.pad_id)
-
-    if isinstance(tokenizer, Llama3Tokenizer):
-        return tokenizer.decode(
-            completion_tokens,
-            skip_special_tokens=False,
-            truncate_at_eos=False
-        )
-    if isinstance(tokenizer, MistralTokenizer):
-        return tokenizer.decode(
-            completion_tokens
-        )
-    if isinstance(tokenizer, PreTrainedTokenizerBase):
-        return tokenizer.decode(
-            completion_tokens,
-            skip_special_tokens=False,
-        )
-
-    raise NotImplementedError(f"{type(tokenizer)} is not supported")

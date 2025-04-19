@@ -38,7 +38,7 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 # Tokenizer
 tokenizer:
-  _component_: torchtune.models.mistral.mistral_tokenizer
+  _component_: ppotune.tokenizers.mistral2_tokenizer
   path: ${prefix}/models/${model}/tokenizer.model
   max_seq_len: 2500
 
@@ -64,8 +64,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_seq_len: ${tokenizer.max_seq_len}
-  max_generated_tokens: 58
+  max_response_len: 58
   temperature: 0.7
   top_k: null
   model:

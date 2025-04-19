@@ -60,8 +60,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_seq_len: ${tokenizer.max_seq_len}
-  max_generated_tokens: 250
+  max_response_len: 250
   temperature: 0.7
   top_k: null
   model:
@@ -100,7 +99,7 @@ shuffle: True
 
 # reduces training performance but helps a lot with CUDA OOMs and invalid
 # memory access errors in tight memoty setup
-# empty_cache_after_generation: True
+empty_cache_after_generation: True
 
 optimizer:
   _component_: bitsandbytes.optim.PagedAdamW

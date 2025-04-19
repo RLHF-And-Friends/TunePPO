@@ -16,9 +16,10 @@ dependencies = [
 	# huggingface framework family
 	"bitsandbytes",
 	"transformers", # for tokenizers with chat templates
-
 	# logging
 	"wandb",
+	# evaluation
+	"openai",
 ]
 
 # --------------------------- Build Specification --------------------------- #

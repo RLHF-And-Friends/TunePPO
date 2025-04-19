@@ -36,6 +36,23 @@ def tokenize_messages(
     )
 
 
+def encode(
+    self: PreTrainedTokenizerBase,
+    text: str,
+    add_bos: bool = True,
+    add_eos: bool = False
+) -> list[int]:
+    if add_bos:
+        tokens = self.old_encode(text, add_special_tokens=True, truncation=True)
+    else:
+        tokens = self.old_encode(text, add_special_tokens=False, truncation=True)
+
+    if add_eos:
+        tokens += self.eos_token_id
+
+    return tokens
+
+
 def hf_tokenizer(
     path: str,
     pad_token: str | None = None,
@@ -49,6 +66,12 @@ def hf_tokenizer(
 
     tokenizer.pad_id = tokenizer.pad_token_id
     tokenizer.eos_id = tokenizer.eos_token_id
+
     tokenizer.tokenize_messages = MethodType(tokenize_messages, tokenizer)
+
+    tokenizer.old_encode = tokenizer.encode
+    tokenizer.encode = MethodType(encode, tokenizer)
+
+    tokenizer.max_seq_len = max_seq_len
 
     return tokenizer

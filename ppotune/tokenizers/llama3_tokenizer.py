@@ -55,6 +55,17 @@ class Llama3Tokenizer(DefaultLlama3Tokenizer):
 
         return tokens
 
+    def decode(
+        self,
+        token_ids: tp.List[int],
+        skip_special_tokens: bool = True,
+    ) -> str:
+        return super().decode(
+            token_ids,
+            truncate_at_eos=False,
+            skip_special_tokens=skip_special_tokens
+        )
+
     def generation_prompt(self) -> tp.List[int]:
         return self._tokenize_header(
             Message(role="assistant", content="")

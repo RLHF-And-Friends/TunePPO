@@ -15,8 +15,11 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.1_8B_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.1_8b_ppo.yaml
 #
+# To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
+# export OPENAI_API_KEY=<your API key>.
+# Use this variable even if you use deepinfra.
 
 # NOTE: Use full paths only. '~' would not expand.
 # NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
@@ -24,11 +27,11 @@
 
 
 # Change those to your preference. Do not do that via CLI!
-prefix: /home/optteam/.tune
+prefix: /home/evgurovv/torchtune
 
 project: TLDR
-group: Llama-SmallSFT-PPO
-model: TLDR-Llama-3.1-8B-SmallSFT
+group: Llama-Base-PPO
+model: Llama-3.1-8B-Base
 reward: TLDR-Llama-3.1-8B-SmallSFT-RM
 run: PPO
 
@@ -43,11 +46,24 @@ tokenizer:
 
 # Dataset
 dataset:
-  _component_: ppotune.datasets.text_completion_dataset
+  _component_: ppotune.datasets.tldr_dataset
   source: RLHF-And-Friends/tldr-ppo
-  # source: trl-lib/tldr
   split: train
-  column: prompt
+
+evaluation_dataset:
+  _component_: ppotune.datasets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
+  split: validation
+
+# Evaluator
+evaluator:
+  _component_: ppotune.evaluation.reference_completion_evaluator
+  arbiter:
+    _component_: ppotune.arbiters.tldr_arbiter
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  num_samples: 128 # better be divisible by forward_batch_size
+  every_n_steps: 20
 
 # Batch parameters
 batch_size: 64
@@ -62,8 +78,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_seq_len: ${tokenizer.max_seq_len}
-  max_generated_tokens: 58
+  max_response_len: 58
   temperature: 0.7
   top_k: null
   model:
@@ -132,6 +147,10 @@ advantage:
 
 seed: 0xD1CE
 shuffle: True
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: True
 
 optimizer:
   _component_: bitsandbytes.optim.PagedAdamW
