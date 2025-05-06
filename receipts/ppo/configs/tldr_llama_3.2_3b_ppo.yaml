@@ -178,7 +178,7 @@ advantage:
 #
 reference:
   _component_: ppotune.comm.distributed_policy_mixture
-  update_every_n_steps: 13
+  update_every_n_steps: 1
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:
