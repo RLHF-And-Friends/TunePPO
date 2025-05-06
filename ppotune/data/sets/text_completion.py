@@ -1,10 +1,9 @@
 import typing as tp
-from torch.utils.data import Dataset
 
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.transforms import Transform
 
-from datasets import load_dataset
+from ppotune.data.sets.base import BaseDataset
 
 
 class TextCompletion(tp.TypedDict):
@@ -17,7 +16,7 @@ class TCTransform(Transform):
         pass
 
 
-class TextCompletionDataset(Dataset):
+class TextCompletionDataset(BaseDataset):
     """
     Text Completion dataset class.
     """
@@ -26,14 +25,16 @@ class TextCompletionDataset(Dataset):
         tokenizer: ModelTokenizer,
         *,
         source: str,
+        configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
         sample_transform: TCTransform,
         filter_fn: tp.Optional[tp.Callable] = None,
         **load_dataset_kwargs: tp.Dict[str, tp.Any],
     ) -> None:
+        super().__init__(source, configurations, **load_dataset_kwargs)
 
         self.tokenizer = tokenizer
         self.sample_transform = sample_transform
-        self.data = load_dataset(source, **load_dataset_kwargs)
+
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
 

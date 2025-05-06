@@ -29,6 +29,8 @@ class WandbLogger(MetricLoggerInterface):
             group = f"{group}-{dist.get_world_size()}x"
         if name := config.get("name"):
             name = f"{name}-{dist.get_rank()}/{dist.get_world_size() - 1}"
+        if additional_info := config.get("additional_info"):
+            name = f"{name}-{additional_info[dist.get_rank()]}"
 
         dir = os.path.expanduser(config.dir)
         if not os.path.exists(dir):

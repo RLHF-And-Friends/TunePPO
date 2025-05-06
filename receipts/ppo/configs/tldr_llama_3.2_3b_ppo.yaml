@@ -38,6 +38,8 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
 
+empty_cache_after_generation: True
+
 # Notable relations for further reference
 #
 # (1) total_steps = dataloader.num_steps * dataloader.num_epochs
@@ -61,7 +63,11 @@ dataset:
   # source: RLHF-And-Friends/tldr-ppo
   source: RLHF-And-Friends/tldr-thematic
   split: train
-  configurations: [legaladvice, personalfinance, relationship_advice, tifu] # assert len(conf) == num_agents
+  configurations:
+    0: [legaladvice]
+    1: [personalfinance]
+    # 2: relationship_advice
+    # 3: tifu
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -72,8 +78,9 @@ dataloader:
 
 evaluation_dataset:
   _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
+  source: RLHF-And-Friends/tldr-thematic
   split: validation
+  # configurations: [legaladvice, personalfinance] #, relationship_advice, tifu]
 
 evaluation_dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -206,3 +213,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
+  additional_info: ${dataset.configurations}
