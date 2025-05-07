@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.2-3B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,16 +6,16 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT-RM --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT-RM/
-# 2. Get Llama3.2-3B model
-#   a. (Base) tune download meta-llama/Llama-3.2-3B --output-dir ~/.tune/models/Llama-3.2-3B-Base/
-#   b. (SmallSFT) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT/
+#   a. (General Skywork chat RM) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2 --output-dir ~/.tune/models/Skywork-Reward-Llama-3.1-8B-v0.2/
+# 2. Get Llama3.1-8B model
+#   a. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/
+#   b. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ~/.tune/models/Llama-3.1-8B-Instruct/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.2_3b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/helpsteer_llama_3.1_8b_ppo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -27,12 +27,12 @@
 
 prefix: ~/.tune
 
-project: TLDR
-group: Llama-SmallSFT-PPO-Update-Interval
-# model: Llama-3.2-3B-Base 
-model: Llama-3.2-3B-SmallSFT
-reward: Llama-3.2-3B-SmallSFT-RM
-run: PPO-update-every-${reference.update_every_n_steps}-steps
+project: Helpsteer
+group: Llama-Instruct-PPO
+# model: Llama-3.2-3B-Base
+model: Llama-3.1-8B-Instruct
+reward: Skywork-Reward-Llama-3.1-8B-v0.2
+run: personalized
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -59,15 +59,12 @@ tokenizer:
   max_seq_len: 2500
 
 dataset:
-  _component_: ppotune.data.sets.tldr_dataset
-  # source: RLHF-And-Friends/tldr-ppo
-  source: RLHF-And-Friends/tldr-thematic
+  _component_: ppotune.data.sets.helpsteer_dataset
+  source: RLHF-And-Friends/helpsteer3-multilingual
   split: train
   configurations:
-    0: [legaladvice]
-    1: [personalfinance]
-    # 2: [relationship_advice]
-    # 3: [tifu]
+    0: [chinese]
+    1: [french, german, russian]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -77,10 +74,10 @@ dataloader:
   num_epochs: 6
 
 evaluation_dataset:
-  _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
+  _component_: ppotune.data.sets.helpsteer_dataset
+  source: RLHF-And-Friends/helpsteer3-multilingual
   split: validation
-  # configurations: [legaladvice, personalfinance] #, relationship_advice, tifu]
+  configurations: [chinese, french, german, russian]
 
 evaluation_dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -90,7 +87,7 @@ evaluation_dataloader:
 evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
-    _component_: ppotune.arbiters.tldr_arbiter
+    _component_: ppotune.arbiters.default_arbiter
     base_url: https://api.deepinfra.com/v1/openai
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
   every_n_steps: 13
@@ -111,7 +108,7 @@ policy:
   temperature: 0.7
   top_k: null
   model:
-    _component_: torchtune.models.llama3_2.lora_llama3_2_3b
+    _component_: torchtune.models.llama3_1.lora_llama3_1_8b
     # (Q)LoRA
     lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
     apply_lora_to_mlp: True
@@ -125,13 +122,15 @@ policy:
     checkpoint_dir: ${prefix}/models/${model}/
     checkpoint_files:
       [
-        "model-00001-of-00002.safetensors",
-        "model-00002-of-00002.safetensors",
+        "model-00001-of-00004.safetensors",
+        "model-00002-of-00004.safetensors",
+        "model-00003-of-00004.safetensors",
+        "model-00004-of-00004.safetensors",
       ]
     # this is the only place where you should update `recipe_checkpoint` if resuming training
     recipe_checkpoint: null
     output_dir: ${output_dir}/policy
-    model_type: MISTRAL
+    model_type: LLAMA3
 
 
 # ---------------------------- Advantage Model ------------------------------ #
@@ -160,14 +159,16 @@ advantage:
         checkpoint_dir: ${prefix}/models/${reward}/
         checkpoint_files:
           [
-            "model-00001-of-00002.safetensors",
-            "model-00002-of-00002.safetensors",
+            "model-00001-of-00004.safetensors",
+            "model-00002-of-00004.safetensors",
+            "model-00003-of-00004.safetensors",
+            "model-00004-of-00004.safetensors",
           ]
         output_dir: ${output_dir}/scorer
         model_type: REWARD
 
       model:
-        _component_: ppotune.models.llama3_2.lora_llama3_2_3b_reward
+        _component_: ppotune.models.llama3_1.lora_llama3_1_reward_8b
         # (Q)LoRA
         lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
         apply_lora_to_mlp: True
