@@ -19,7 +19,7 @@
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
-# Use this variable even if you use deepinfra.
+# Use this variable even if you use deepinfra or self-hosted remote LLM.
 #
 # NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
 # updated.
@@ -62,9 +62,10 @@ dataset:
   _component_: ppotune.data.sets.helpsteer_dataset
   source: RLHF-And-Friends/helpsteer3-multilingual
   split: train
+  max_input_tokens: 1000
   configurations:
-    0: [chinese]
-    1: [french, german, russian]
+    # 0: [chinese]
+    0: [french, german, russian, italian, spanish]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -77,6 +78,7 @@ evaluation_dataset:
   _component_: ppotune.data.sets.helpsteer_dataset
   source: RLHF-And-Friends/helpsteer3-multilingual
   split: validation
+  max_input_tokens: 1000
   configurations: [chinese, french, german, russian]
 
 evaluation_dataloader:
@@ -89,7 +91,9 @@ evaluator:
   arbiter:
     _component_: ppotune.arbiters.default_arbiter
     base_url: https://api.deepinfra.com/v1/openai
+    # base_url: https://window-analysis-partnerships-jpg.trycloudflare.com/v1/
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    # model: qwen3:32bs
   every_n_steps: 13
 
 # PPO Optimization Batch Parameters
@@ -104,7 +108,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_response_len: 58
+  max_response_len: 1000
   temperature: 0.7
   top_k: null
   model:

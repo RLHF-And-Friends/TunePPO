@@ -61,7 +61,6 @@ def hf_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(
         path,
         pad_token = pad_token,
-        model_max_length = max_seq_len
     )
 
     tokenizer.pad_id = tokenizer.pad_token_id

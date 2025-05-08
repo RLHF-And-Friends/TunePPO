@@ -91,8 +91,11 @@ evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
     _component_: ppotune.arbiters.tldr_arbiter
-    base_url: https://api.deepinfra.com/v1/openai
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    # base_url: https://api.deepinfra.com/v1/openai
+    base_url: https://window-analysis-partnerships-jpg.trycloudflare.com/v1/
+    # model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    model: qwen3:32b
+    concurrent: False
   every_n_steps: 13
 
 # PPO Optimization Batch Parameters
@@ -182,7 +185,7 @@ advantage:
 #
 reference:
   _component_: ppotune.comm.distributed_policy_mixture
-  update_every_n_steps: 20
+  update_every_n_steps: 13
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:

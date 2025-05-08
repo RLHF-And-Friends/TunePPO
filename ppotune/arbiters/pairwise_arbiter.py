@@ -63,15 +63,17 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         system_prompt: str,
         base_url: tp.Optional[str] = None,
         model: str = "gpt-4o-mini",
+        concurrent: bool = True,
     ) -> None:
         self._client = OpenAI(base_url=base_url)
         self._model = model
         self._system_prompt = system_prompt
+        self._concurrent = concurrent
 
     def judge(
         self,
         prompts: tp.List[str],
-        completions: tp.List[tp.List[str]],
+        completions: tp.List[tp.Tuple[str, str]],
         shuffle_order: bool = True
     ) -> list[int]:
 
@@ -84,10 +86,19 @@ class RemotePairwiseArbiter(PairwiseArbiter):
                 for flip, pair in zip(flip_mask, completions)
             ]
 
-        # Call the completions concurrently
+        # Call the completions concurrently or sequentially
         # -----------------------------------------------------------------------------------------
-        with ThreadPoolExecutor() as executor:
-            ranks = list(executor.map(self._get_rank, prompts, completions))
+
+        if self._concurrent:
+            with ThreadPoolExecutor() as executor:
+                ranks = list(executor.map(self._get_rank, prompts, completions))
+        else:
+            ranks = [
+                self._get_rank(
+                    prompt,
+                    completions_pair
+                ) for prompt, completions_pair in zip(prompts, completions)
+            ]
 
         # Flip back the ranks to the original order if needed
         # -----------------------------------------------------------------------------------------
@@ -96,7 +107,7 @@ class RemotePairwiseArbiter(PairwiseArbiter):
 
         return ranks
 
-    def _get_rank(self, prompt: str, candidates: tp.Tuple[str, str]):
+    def _get_rank(self, prompt: str, candidates: tp.Tuple[str, str]) -> int:
         """
         Get the rank for a single prompt.
         """
@@ -109,9 +120,8 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=messages,
-            max_tokens=1
         )
-        response = completion.choices[0].message.content
+        response = completion.choices[0].message.content[-1]
         if response in ["0", "1"]:
             response = int(response)
         else:
