@@ -1,40 +1,38 @@
 import typing as tp
 
+import logging
+
 from functools import partial
 
-from ppotune.data.sets.base import BaseDataset
+from torch.utils.data import Dataset
 
 from torchtune.modules.tokenizers import ModelTokenizer
-from torchtune.data._messages import OpenAIToMessages
+from torchtune.data._messages import OpenAIToMessages, Transform
+from ppotune.data.utils import load_dataset_with_configurations
 
 
-class HelpsteerDataset(BaseDataset):
+class HelpsteerDataset(Dataset):
     def __init__(
         self,
-        tokenizer: ModelTokenizer,
         source: str,
-        max_input_tokens: tp.Optional[int] = None,
+        tokenizer: ModelTokenizer,
+        message_transform: Transform,
         configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
+        filter_fn: tp.Optional[tp.Callable] = None,
         **load_dataset_kwargs
     ) -> None:
-        super().__init__(source, configurations, **load_dataset_kwargs)
-
-        self._message_transform = OpenAIToMessages(
-            train_on_input=True,
-            column_map={"messages": "context"},
+        self.data = load_dataset_with_configurations(
+            source,
+            configurations,
+            **load_dataset_kwargs
         )
+
+        self._message_transform = message_transform
         self._tokenizer = tokenizer
 
-        if max_input_tokens is not None:
-            self._max_tokens = max_input_tokens
-            self.data = self.data.filter(self._filter_by_length)
-            print("Dataset length after filtering:", self.__len__())
-
-    def _filter_by_length(self, sample) -> None:
-        messages = self._message_transform(sample)
-        tokens = self._tokenizer.tokenize_messages(messages["messages"])
-
-        return len(tokens) < self._max_tokens
+        if filter_fn is not None:
+            self.data = self.data.filter(filter_fn)
+            logging.info("Dataset length after filtering:", self.__len__())
 
     def __getitem__(self, index):
         sample = self.data[index]
@@ -45,9 +43,58 @@ class HelpsteerDataset(BaseDataset):
         tokens = self._tokenizer.tokenize_messages(messages["messages"])
         
         return {"tokens": tokens, "completion": response}
+    
+    def __len__(self):
+        return len(self.data)
 
 
-helpsteer_dataset = partial(HelpsteerDataset)
-helpsteer_dataset.__doc__ = """
-Builder for helpsteer dataset
-"""
+# Filtering function
+# =================================================================================================
+
+def filter_by_length(
+    sample,
+    tokenizer: ModelTokenizer,
+    message_transform: tp.Callable,
+    max_tokens: int
+) -> None:
+    messages = message_transform(sample)
+    tokens = tokenizer.tokenize_messages(messages["messages"])
+
+    return len(tokens) < max_tokens
+
+
+# Helpsteer builder
+# =================================================================================================
+
+def helpsteer_dataset(
+    tokenizer: ModelTokenizer,
+    source: str,
+    configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
+    max_input_tokens: tp.Optional[int] = None,
+    **load_dataset_kwargs
+) -> HelpsteerDataset:
+    
+    message_transform = OpenAIToMessages(
+        train_on_input=True,
+        column_map={"messages": "context"},
+    )
+    
+    if max_input_tokens is not None:
+        filter_fn = partial(
+            filter_by_length,
+            tokenizer=tokenizer,
+            message_transform=message_transform,
+            max_tokens=max_input_tokens
+        )
+    else:
+        filter_fn = None
+
+    return HelpsteerDataset(
+        source=source,
+        tokenizer=tokenizer,
+        message_transform=message_transform,
+        configurations=configurations,
+        filter_fn=filter_fn,
+        **load_dataset_kwargs
+    )
+        

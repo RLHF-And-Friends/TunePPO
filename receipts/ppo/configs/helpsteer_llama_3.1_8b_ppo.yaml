@@ -32,7 +32,7 @@ group: Llama-Instruct-PPO
 # model: Llama-3.2-3B-Base
 model: Llama-3.1-8B-Instruct
 reward: Skywork-Reward-Llama-3.1-8B-v0.2
-run: personalized
+run: code
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -60,12 +60,12 @@ tokenizer:
 
 dataset:
   _component_: ppotune.data.sets.helpsteer_dataset
-  source: RLHF-And-Friends/helpsteer3-multilingual
+  source: RLHF-And-Friends/helpsteer3-code
   split: train
   max_input_tokens: 1000
   configurations:
-    # 0: [chinese]
-    0: [french, german, russian, italian, spanish]
+    # 0: [python]
+    0: [javascript_html_css, typescript, sql]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -76,10 +76,10 @@ dataloader:
 
 evaluation_dataset:
   _component_: ppotune.data.sets.helpsteer_dataset
-  source: RLHF-And-Friends/helpsteer3-multilingual
+  source: RLHF-And-Friends/helpsteer3-code
   split: validation
   max_input_tokens: 1000
-  configurations: [chinese, french, german, russian]
+  configurations: null
 
 evaluation_dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -187,7 +187,7 @@ advantage:
 #
 reference:
   _component_: ppotune.comm.distributed_policy_mixture
-  update_every_n_steps: 20
+  update_every_n_steps: 13
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:

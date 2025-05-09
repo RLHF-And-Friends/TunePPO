@@ -63,12 +63,10 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         system_prompt: str,
         base_url: tp.Optional[str] = None,
         model: str = "gpt-4o-mini",
-        concurrent: bool = True,
     ) -> None:
         self._client = OpenAI(base_url=base_url)
         self._model = model
         self._system_prompt = system_prompt
-        self._concurrent = concurrent
 
     def judge(
         self,
@@ -86,24 +84,21 @@ class RemotePairwiseArbiter(PairwiseArbiter):
                 for flip, pair in zip(flip_mask, completions)
             ]
 
-        # Call the completions concurrently or sequentially
+        # Get ranks for completions
         # -----------------------------------------------------------------------------------------
 
-        if self._concurrent:
-            with ThreadPoolExecutor() as executor:
-                ranks = list(executor.map(self._get_rank, prompts, completions))
-        else:
-            ranks = [
-                self._get_rank(
-                    prompt,
-                    completions_pair
-                ) for prompt, completions_pair in zip(prompts, completions)
-            ]
+        ranks = self._get_ranks(prompts, completions)
 
         # Flip back the ranks to the original order if needed
         # -----------------------------------------------------------------------------------------
         if shuffle_order:
             ranks = [ranks[i] if not flip else 1 - ranks[i] for i, flip in enumerate(flip_mask)]
+
+        return ranks
+
+    def _get_ranks(self, prompts, completions):
+        with ThreadPoolExecutor() as executor:
+            ranks = list(executor.map(self._get_rank, prompts, completions))
 
         return ranks
 
@@ -131,3 +126,20 @@ class RemotePairwiseArbiter(PairwiseArbiter):
             return -1
 
         return response
+
+
+class SequentialRemotePairwiseArbiter(RemotePairwiseArbiter):
+    """
+    Arbiter with sequential calls to internal LLM API. Used mostly to avoid
+    timeouts when calling self-hosted LLMs because single LLM is not capable of
+    processing parallel requests.
+    """
+    def _get_ranks(self, prompts, completions):
+        ranks = [
+            self._get_rank(
+                prompt,
+                completions_pair
+            ) for prompt, completions_pair in zip(prompts, completions)
+        ]
+
+        return ranks
