@@ -22,17 +22,15 @@ def tldr_dataset(
     *,
     source: str = "trl-lib/tldr",
     split: str = "train",
-    configurations: tp.Optional[list[str]] = None,
+    configurations: tp.Optional[str | list[str] | tp.Dict[int, list[str]]] = None,
     **load_dataset_kwargs: tp.Dict[str, tp.Any],
 ) -> TextCompletionDataset:
-
-    configuration = configurations[dist.get_rank()] if configurations else None
 
     return TextCompletionDataset(
         tokenizer=tokenizer,
         source=source,
+        configurations=configurations,
         sample_transform=TLDRTransform(),
         split=split,
-        name=configuration,
         **load_dataset_kwargs
     )

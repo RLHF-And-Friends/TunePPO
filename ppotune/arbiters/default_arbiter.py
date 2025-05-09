@@ -1,6 +1,9 @@
 from functools import partial
 
-from ppotune.arbiters.pairwise_arbiter import RemotePairwiseArbiter
+from ppotune.arbiters.pairwise_arbiter import (
+    RemotePairwiseArbiter,
+    SequentialRemotePairwiseArbiter
+)
 
 
 DEFAULT_PAIRWISE_SYSTEM_PROMPT = '''I require a leaderboard for various large language models. I'll provide you with prompts given to these models and their corresponding outputs. Your task is to assess these responses, and select the model that produces the best output from a human perspective.
@@ -36,8 +39,16 @@ default_arbiter = partial(
     RemotePairwiseArbiter,
     system_prompt = DEFAULT_PAIRWISE_SYSTEM_PROMPT
 )
-
 default_arbiter.__doc__ = """
 Builder for arbiters assesing general models quality and relevance.
 """
 
+sequential_default_arbiter = partial(
+    SequentialRemotePairwiseArbiter,
+    system_prompt = DEFAULT_PAIRWISE_SYSTEM_PROMPT
+)
+sequential_default_arbiter.__doc__ = """
+Builder for arbiters assesing general models quality and relevance with with 
+calling internal LLM API sequentially (check `SequentialRemotePairwiseArbiter` 
+doc for more info).
+"""

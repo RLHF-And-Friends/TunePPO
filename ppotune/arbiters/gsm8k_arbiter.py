@@ -1,6 +1,9 @@
 from functools import partial
 
-from ppotune.arbiters.pairwise_arbiter import RemotePairwiseArbiter
+from ppotune.arbiters.pairwise_arbiter import (
+    RemotePairwiseArbiter,
+    SequentialRemotePairwiseArbiter
+)
 
 
 GSM8K_PAIRWISE_SYSTEM_PROMPT = '''You are evaluating the performance of different language models on a math problem-solving task. Each model is given a grade school math word problem from the GSM8K dataset and tasked with producing a correct and well-reasoned final answer. Your job is to compare the outputs and select the model that solves the problem best from a human perspective.
@@ -36,7 +39,15 @@ gsm8k_arbiter = partial(
     RemotePairwiseArbiter,
     system_prompt = GSM8K_PAIRWISE_SYSTEM_PROMPT
 )
-
 gsm8k_arbiter.__doc__ = """
 Builder for arbiter assesing models on reasoning task.
+"""
+
+sequential_gsm8k_arbiter = partial(
+    SequentialRemotePairwiseArbiter,
+    system_prompt = GSM8K_PAIRWISE_SYSTEM_PROMPT
+)
+sequential_gsm8k_arbiter.__doc__="""
+Builder for arbiter assesing models on resoning task with calling internal LLM
+API sequentially (check `SequentialRemotePairwiseArbiter` doc for more info).
 """

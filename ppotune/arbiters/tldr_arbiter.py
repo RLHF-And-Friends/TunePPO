@@ -1,6 +1,9 @@
 from functools import partial
 
-from ppotune.arbiters.pairwise_arbiter import RemotePairwiseArbiter
+from ppotune.arbiters.pairwise_arbiter import (
+    RemotePairwiseArbiter,
+    SequentialRemotePairwiseArbiter
+)
 
 
 TLDR_PAIRWISE_SYSTEM_PROMPT = '''You are evaluating the performance of different language models on a summarization task. Each model is given a Reddit post from the trl-lib/tldr dataset and tasked with generating a concise and accurate summary. Your job is to compare the outputs and select the model that produces the best summary from a human perspective.
@@ -36,7 +39,16 @@ tldr_arbiter = partial(
     RemotePairwiseArbiter,
     system_prompt = TLDR_PAIRWISE_SYSTEM_PROMPT
 )
-
 tldr_arbiter.__doc__ = """
 Builder for arbiters assesing models on summarization task.
+"""
+
+sequential_tldr_arbiter = partial(
+    SequentialRemotePairwiseArbiter,
+    system_prompt = TLDR_PAIRWISE_SYSTEM_PROMPT
+)
+sequential_tldr_arbiter.__doc__ = """
+Builder for arbiters assesing models on summarization task with calling 
+internal LLM API sequentially (check `SequentialRemotePairwiseArbiter` doc 
+for more info).
 """

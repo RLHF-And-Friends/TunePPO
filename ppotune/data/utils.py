@@ -1,6 +1,14 @@
 import typing as tp
 from torchtune.data import Message
 
+import torch.distributed as dist
+
+from datasets import (
+    load_dataset,
+    concatenate_datasets,
+    get_dataset_config_names
+)
+
 
 class PrefixSuffix(tp.NamedTuple):
     """
@@ -40,3 +48,57 @@ def apply_prompt_template(
         result += template["assistant"].prefix
 
     return result
+
+
+def load_dataset_with_configurations(
+    source: str,
+    configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
+    **load_dataset_kwargs: tp.Dict[str, tp.Any],
+    ):
+
+    if isinstance(configurations, str):
+        data = load_concat_dataset(
+            source,
+            [configurations],
+            **load_dataset_kwargs
+        )
+    elif isinstance(configurations, list):
+        data = load_concat_dataset(
+            source,
+            configurations,
+            **load_dataset_kwargs
+        )
+    elif isinstance(configurations, dict):
+        worker_configurations = configurations[dist.get_rank()]
+        data = load_concat_dataset(
+            source,
+            worker_configurations,
+            **load_dataset_kwargs
+        )
+    elif configurations is None:
+        all_configurations = get_dataset_config_names(source)
+        data = load_concat_dataset(
+            source,
+            all_configurations,
+            **load_dataset_kwargs
+        )
+    else:
+        raise Exception("Wrong configurations format!")
+
+    return data
+
+  
+def load_concat_dataset(
+    source: str,
+    configurations: list[str],
+    **load_dataset_kwargs
+) -> None:
+    data = concatenate_datasets([
+        load_dataset(
+            path=source,
+            name=configuration,
+            **load_dataset_kwargs
+        ) for configuration in configurations
+    ])
+
+    return data

@@ -10,6 +10,9 @@ from ppotune.data.sets.alpaca import (
 from ppotune.data.sets.tldr import (
     tldr_dataset
 )
+from ppotune.data.sets.helpsteer import (
+    helpsteer_dataset
+)
 
 __all__ = [
     "gsm8k_dataset",
@@ -18,4 +21,5 @@ __all__ = [
     "alpaca_dataset",
     "tldr_dataset",
     "eval_gsm8k_dataset",
+    "helpsteer_dataset",
 ]

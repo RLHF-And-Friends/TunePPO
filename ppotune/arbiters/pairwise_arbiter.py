@@ -71,7 +71,7 @@ class RemotePairwiseArbiter(PairwiseArbiter):
     def judge(
         self,
         prompts: tp.List[str],
-        completions: tp.List[tp.List[str]],
+        completions: tp.List[tp.Tuple[str, str]],
         shuffle_order: bool = True
     ) -> list[int]:
 
@@ -84,10 +84,10 @@ class RemotePairwiseArbiter(PairwiseArbiter):
                 for flip, pair in zip(flip_mask, completions)
             ]
 
-        # Call the completions concurrently
+        # Get ranks for completions
         # -----------------------------------------------------------------------------------------
-        with ThreadPoolExecutor() as executor:
-            ranks = list(executor.map(self._get_rank, prompts, completions))
+
+        ranks = self._get_ranks(prompts, completions)
 
         # Flip back the ranks to the original order if needed
         # -----------------------------------------------------------------------------------------
@@ -96,7 +96,13 @@ class RemotePairwiseArbiter(PairwiseArbiter):
 
         return ranks
 
-    def _get_rank(self, prompt: str, candidates: tp.Tuple[str, str]):
+    def _get_ranks(self, prompts, completions):
+        with ThreadPoolExecutor() as executor:
+            ranks = list(executor.map(self._get_rank, prompts, completions))
+
+        return ranks
+
+    def _get_rank(self, prompt: str, candidates: tp.Tuple[str, str]) -> int:
         """
         Get the rank for a single prompt.
         """
@@ -109,9 +115,8 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=messages,
-            max_tokens=1
         )
-        response = completion.choices[0].message.content
+        response = completion.choices[0].message.content[-1]
         if response in ["0", "1"]:
             response = int(response)
         else:
@@ -121,3 +126,20 @@ class RemotePairwiseArbiter(PairwiseArbiter):
             return -1
 
         return response
+
+
+class SequentialRemotePairwiseArbiter(RemotePairwiseArbiter):
+    """
+    Arbiter with sequential calls to internal LLM API. Used mostly to avoid
+    timeouts when calling self-hosted LLMs because single LLM is not capable of
+    processing parallel requests.
+    """
+    def _get_ranks(self, prompts, completions):
+        ranks = [
+            self._get_rank(
+                prompt,
+                completions_pair
+            ) for prompt, completions_pair in zip(prompts, completions)
+        ]
+
+        return ranks
