@@ -54,7 +54,7 @@ def load_dataset_with_configurations(
     source: str,
     configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
     **load_dataset_kwargs: tp.Dict[str, tp.Any],
-    ):
+):
 
     if isinstance(configurations, str):
         data = load_concat_dataset(
@@ -92,7 +92,7 @@ def load_concat_dataset(
     source: str,
     configurations: list[str],
     **load_dataset_kwargs
-) -> None:
+):
     data = concatenate_datasets([
         load_dataset(
             path=source,

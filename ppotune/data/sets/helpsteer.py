@@ -1,14 +1,16 @@
 import typing as tp
 
-import logging
-
 from functools import partial
 
 from torch.utils.data import Dataset
 
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.data._messages import OpenAIToMessages, Transform
+
 from ppotune.data.utils import load_dataset_with_configurations
+from torchtune import utils
+
+log = utils.get_logger("DEBUG")
 
 
 class HelpsteerDataset(Dataset):
@@ -32,7 +34,7 @@ class HelpsteerDataset(Dataset):
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
-            logging.info("Dataset length after filtering:", self.__len__())
+            log.debug(f"Dataset length after filtering: {self.__len__()}")
 
     def __getitem__(self, index):
         sample = self.data[index]
@@ -40,7 +42,10 @@ class HelpsteerDataset(Dataset):
         
         messages = self._message_transform(sample)
         
-        tokens = self._tokenizer.tokenize_messages(messages["messages"])
+        tokens = self._tokenizer.tokenize_messages(
+            messages["messages"],
+            add_generation_prompt = True,
+        )
         
         return {"tokens": tokens, "completion": response}
     
