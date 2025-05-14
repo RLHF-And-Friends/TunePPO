@@ -4,8 +4,11 @@ from torch.utils.data import Dataset
 
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.transforms import Transform
+from torchtune import utils
 
 from ppotune.data.utils import load_dataset_with_configurations
+
+log = utils.get_logger("DEBUG")
 
 
 class TextCompletion(tp.TypedDict):
@@ -43,6 +46,7 @@ class TextCompletionDataset(Dataset):
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
+            log.debug(f"Dataset length after filtering: {self.__len__()}")
 
     def __len__(self):
         return len(self.data)

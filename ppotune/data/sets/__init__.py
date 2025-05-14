@@ -13,6 +13,9 @@ from ppotune.data.sets.tldr import (
 from ppotune.data.sets.helpsteer import (
     helpsteer_dataset
 )
+from ppotune.data.sets.wiki_lingua import (
+    wiki_lingua_dataset
+)
 
 __all__ = [
     "gsm8k_dataset",
@@ -22,4 +25,5 @@ __all__ = [
     "tldr_dataset",
     "eval_gsm8k_dataset",
     "helpsteer_dataset",
+    "wiki_lingua_dataset",
 ]
