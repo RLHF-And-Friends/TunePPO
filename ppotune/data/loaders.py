@@ -34,7 +34,7 @@ def dataloader(
 
     sampler = RepeatedSampler(
         GroupedSampler(
-            PermutationSampler(len(dataset), generator=generator),
+            PermutationSampler(num_samples, generator=generator),
             group_factor=group_size,
         ),
         num_epochs=num_epochs
@@ -46,7 +46,7 @@ def dataloader(
     return DataLoader(
         dataset=dataset,
         sampler=sampler,
-        batch_size=raw_batch_size,
+        batch_size=batch_size,
         drop_last=True,
         collate_fn=collator
     )

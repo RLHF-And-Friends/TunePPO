@@ -203,3 +203,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
+  additional_info: ${dataset.configurations}
