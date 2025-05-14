@@ -87,7 +87,7 @@ def load_dataset_with_configurations(
 
     return data
 
-  
+
 def load_concat_dataset(
     source: str,
     configurations: list[str],

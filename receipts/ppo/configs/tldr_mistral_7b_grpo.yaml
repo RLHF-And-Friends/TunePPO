@@ -62,7 +62,15 @@ dataset:
   # source: RLHF-And-Friends/tldr-ppo
   source: RLHF-And-Friends/tldr-thematic
   split: train
-  configurations: [legaladvice, personalfinance] # assert len(conf) == num_agents
+  configurations: # dist.rank -> list of themes
+    0: [loseit]
+    1: [dating_advice]
+    2: [legaladvice]
+    3: [offmychest]
+    4: [personalfinance]
+    5: [relationship_advice]
+    6: [tifu]
+    7: [Pets, dogs, cats]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
