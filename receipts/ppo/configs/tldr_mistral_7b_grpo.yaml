@@ -30,8 +30,8 @@
 
 prefix: ~/.tune
 
-project: PTLDR
-group: Mistral-Base-GRPO-Personalized
+project: TLDR
+group: Mistral-Base-GRPO
 model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
 reward: TLDR-Mistral-7B-SmallSFT-RM # | TLDR-Mistral-7B-RM
 run: GPPO
