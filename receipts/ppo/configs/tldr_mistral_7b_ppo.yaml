@@ -139,11 +139,7 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff:
-      _component_: ppotune.volatile.linearly_scheduled
-      start: 0.01
-      end: 1.0
-      steps: 1248 # num_forward_steps (2)
+    kl_coeff: 0.1
 
     scorer:
       _component_: ppotune.model.LoRAModel
@@ -191,6 +187,8 @@ optimizer:
   lr: 1e-4
 
 dtype: bf16 # | fp32 | fp16 is not supported
+
+empty_cache_after_generation: True
 
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
