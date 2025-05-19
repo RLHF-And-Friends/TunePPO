@@ -1,5 +1,6 @@
 from ppotune.comm.mixture import (
-    distributed_policy_mixture
+    distributed_policy_mixture,
+    distributed_weight_mixture
 )
 from ppotune.comm.protocols import (
     static_protocol,
@@ -13,6 +14,7 @@ from ppotune.comm.weightage import (
 
 __all__ = [
     "distributed_policy_mixture",
+    "distributed_weight_mixture",
     "static_protocol",
     "score_based_protocol",
     "uniform_weightage",

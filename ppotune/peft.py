@@ -48,6 +48,15 @@ def get_lora_modules(model: nn.Module) -> tp.Iterator[LoRALinear]:
         if isinstance(module, LoRALinear):
             yield module
 
+def get_lora_linears(model: nn.Module) -> tp.Iterator[nn.Linear]:
+    """
+    Returns an iterator over all LoRA A and B linear layers in the network.
+    """
+    for _, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            yield module.lora_a
+            yield module.lora_b
+
 @torch.no_grad()
 def merge_lora_adapter(model: nn.Module) -> nn.Module:
     """
