@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model on Personalized TLDR.
+# Config for single device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -18,7 +18,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_mistral_7b_grpo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/mistral_7b_grpo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.

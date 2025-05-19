@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model on TLDR.
+# Config for single device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model for TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -18,7 +18,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_mistral_7b_grpo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr/mistral_7b_grpo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -39,6 +39,10 @@ run: GPPO
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: False
 
 # Notable relations for further reference
 #
@@ -157,7 +161,7 @@ advantage:
         # (Q)LoRA
         lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
         apply_lora_to_mlp: True
-        apply_lora_to_output: = True
+        apply_lora_to_output: True
         lora_rank: 16
         lora_alpha: 32
         lora_dropout: 0.0

@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model for TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,16 +6,16 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (TLDR RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ~/.tune/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
+#   a. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ~/.tune/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
 # 2. Download the policy model
-#   a. (Base download this to use tokenizer even if you use SFT) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   a. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/
 #   b. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ~/.tune/models/TLDR-Llama-3.1-8B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.1_8b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr/llama_3.1_8b_ppo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -28,52 +28,74 @@
 prefix: ~/.tune
 
 project: TLDR
-group: Llama-Base-PPO
+group: Llama3.1-8B-Base-PPO
 model: Llama-3.1-8B-Base
 reward: TLDR-Llama-3.1-8B-SmallSFT-RM
 run: PPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
-# Tokenizer
+seed: 0xD1CE
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: False
+
+# Notable relations for further reference
+#
+# (1) total_steps = dataloader.num_steps * dataloader.num_epochs
+# e.g for learning rate scheduling
+# (2) num_forward_steps = dataloader.batch_size / forward_batch_size * total_steps
+# e.g. for in-reward kl_coeff scheduling
+# (3) num_communcation_rounds = total_steps / reference.update_every_n_steps
+# e.g. for communication self preference scheduling
+
+# ---------------------------------- Data ----------------------------------- #
+
 tokenizer:
   _component_: ppotune.tokenizers.hf_tokenizer
   path: ${prefix}/models/${model}/
   pad_token: <|finetune_right_pad_id|>
   max_seq_len: 2500
 
-# Dataset
 dataset:
-  _component_: ppotune.datasets.tldr_dataset
+  _component_: ppotune.data.sets.tldr_dataset
   source: RLHF-And-Friends/tldr-ppo
   split: train
 
+dataloader:
+  _component_: ppotune.data.loaders.distributed_dataloader
+  batch_size: 64
+  num_steps: 26
+  num_epochs: 6
+
 evaluation_dataset:
-  _component_: ppotune.datasets.tldr_dataset
+  _component_: ppotune.data.sets.tldr_dataset
   source: RLHF-And-Friends/tldr-ppo
   split: validation
 
-# Evaluator
+evaluation_dataloader:
+  _component_: ppotune.data.loaders.dataloader
+  batch_size: 8 # has to be the same as forward_batch_size
+  num_steps: 16
+
 evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
-    _component_: ppotune.arbiters.gsm8k_arbiter
+    _component_: ppotune.arbiters.tldr_arbiter
     base_url: https://api.deepinfra.com/v1/openai
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-  num_samples: 128 # better be divisible by forward_batch_size
   every_n_steps: 13
-  seed: 0xD1CE
 
-# Batch parameters
-batch_size: 64
-group_size: 1 # needed in GRPO. just leave it as is.
-num_steps: 10000
+# PPO Optimization Batch Parameters
 ppo_epochs: 2
 ppo_batch_size: 32
-gradient_accumulation_steps: 4 # Use to increase effective batch size
+gradient_accumulation_steps: 4
 forward_batch_size: 8
 
-# Policy / Reference Policy when adapter disabled
+
+# --------------------------------- Policy ---------------------------------- #
+#
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
@@ -105,6 +127,8 @@ policy:
     output_dir: ${output_dir}/policy
     model_type: LLAMA3
 
+# ---------------------------- Advantage Model ------------------------------ #
+#
 advantage:
   _component_: ppotune.advantage.GAE
   gamma: 1
@@ -116,7 +140,8 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff: 0.05            # per token kl-penalty coefficient
+    kl_coeff: 0.1
+
     scorer:
       _component_: ppotune.model.LoRAModel
 
@@ -144,38 +169,30 @@ advantage:
         lora_dropout: 0.0
         quantize_base: False
 
-seed: 0xD1CE
-shuffle: True
 
-# reduces training performance but helps a lot with CUDA OOMs and invalid
-# memory access errors in tight memoty setup
-empty_cache_after_generation: True
+# ---------------------------- Reference Model ------------------------------ #
+#
+reference:
+  _component_: ppotune.comm.distributed_policy_mixture
+  update_every_n_steps: 13
+  protocol:
+    _component_: ppotune.comm.static_protocol
+    weightage:
+      _component_: ppotune.comm.uniform_weightage
+      self_preference: 0.6 # may be scheduled with volatile.linearly_scheduled
 
+
+# --------------------------------- Other ----------------------------------- #
+#
 optimizer:
   _component_: bitsandbytes.optim.PagedAdamW
   lr: 1e-4
 
 dtype: bf16 # | fp32 | fp16 is not supported
 
-sampler:
-  _component_: torch.utils.data.DistributedSampler
-
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
-  coeff: 0.00
-
-kl_scheduler:
-  _component_: ppotune.schedulers.linear_scheduler
-  initial_value: ${advantage.reward.kl_coeff}
-  final_value: 0.1
-
-# Regulates probability mass given to self-reference acc. to formula
-# ref = self_preference * self_ref + (1 - self_preference) * others_ref.mean()
-# Needed in cooperative setup. In single-agent setup set to null
-self_preference: 0.8
-# Regulates temperature in `softmax` when obtaining weights for reweighting
-# policies in KL term
-weighting_temp: null
+  coeff: 0.0
 
 # PPO Loss
 # clipping hyperparameter
@@ -188,6 +205,3 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
-
-log_every_n_steps: 1
-update_ref_policy_every_n_steps: 13

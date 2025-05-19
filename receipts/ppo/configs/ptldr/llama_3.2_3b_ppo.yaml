@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.2-3B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.2-3B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -15,7 +15,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_llama_3.2_3b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/llama_3.2_3b_ppo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -28,9 +28,8 @@
 prefix: ~/.tune
 
 project: PTLDR
-group: Llama-SmallSFT-PPO
+group: Llama3.2-3B-Base-PPO-Personalized
 model: Llama-3.2-3B-Base
-# model: Llama-3.2-3B-SmallSFT
 reward: Llama-3.2-3B-SmallSFT-RM
 run: PPO
 
@@ -38,7 +37,9 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
 
-empty_cache_after_generation: True
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: False
 
 # Notable relations for further reference
 #
@@ -60,25 +61,29 @@ tokenizer:
 
 dataset:
   _component_: ppotune.data.sets.tldr_dataset
-  # source: RLHF-And-Friends/tldr-ppo
   source: RLHF-And-Friends/tldr-thematic
   split: train
-  configurations:
-    0: [legaladvice]
-    1: [personalfinance]
+  configurations: # dist.rank -> list of themes
+    0: [loseit]
+    1: [dating_advice]
+    2: [legaladvice]
+    3: [offmychest]
+    4: [personalfinance]
+    5: [relationship_advice]
+    6: [tifu]
+    7: [Pets, dogs, cats]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
   # _component_: ppotune.data.loaders.distributed_dataloader
   batch_size: 64
-  num_steps: 26
+  num_steps: 22
   num_epochs: 6
 
 evaluation_dataset:
   _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-thematic
+  source: RLHF-And-Friends/tldr-ppo
   split: validation
-  configurations: [legaladvice, personalfinance]
 
 evaluation_dataloader:
   _component_: ppotune.data.loaders.dataloader
@@ -90,9 +95,7 @@ evaluator:
   arbiter:
     _component_: ppotune.arbiters.tldr_arbiter
     base_url: https://api.deepinfra.com/v1/openai
-    # base_url: https://window-analysis-partnerships-jpg.trycloudflare.com/v1/
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-    # model: qwen3:32b
   every_n_steps: 13
 
 # PPO Optimization Batch Parameters
@@ -131,7 +134,7 @@ policy:
     # this is the only place where you should update `recipe_checkpoint` if resuming training
     recipe_checkpoint: null
     output_dir: ${output_dir}/policy
-    model_type: MISTRAL
+    model_type: LLAMA3
 
 
 # ---------------------------- Advantage Model ------------------------------ #
@@ -147,11 +150,8 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff:
-      _component_: ppotune.volatile.linearly_scheduled
-      start: 0.1
-      end: 1.0
-      steps: 1248
+    kl_coeff: 0.1
+
     scorer:
       _component_: ppotune.model.LoRAModel
 
@@ -187,11 +187,7 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference:
-        _component_: ppotune.volatile.linearly_scheduled
-        start: 1.0
-        end: 0.5
-        steps: 157 # num_communcation_rounds (3) + initialization
+      self_preference: 0.6 # may be scheduled with volatile.linearly_scheduled
 
 
 # --------------------------------- Other ----------------------------------- #
