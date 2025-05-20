@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,16 +6,20 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2 --output-dir ~/.tune/models/Llama-3.1-8B-Skywork-RM/
+#   a. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT-RM --output-dir ~/.tune/models/TLDR-Llama-3.1-8B-SmallSFT-RM/
 # 2. Download the policy model
-#   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ~/.tune/models/Llama-3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (SFT) tune download RLHF-And-Friends/Llama-3.1-8B-SFT-Uch --output-dir ~/.tune/models/Llama-3.1-8B-SFT-Ultrachat/
+#   a. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/
+#   b. (SFT) tune download RLHF-And-Friends/TLDR-Llama-3.1-8B-SmallSFT --output-dir ~/.tune/models/TLDR-Llama-3.1-8B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/alpaca_llama_3.1_8B_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/llama_3.1_8b_ppo.yaml
+#
+# To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
+# export OPENAI_API_KEY=<your API key>.
+# Use this variable even if you use deepinfra.
 #
 # NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
 # updated.
@@ -23,41 +27,88 @@
 
 prefix: ~/.tune
 
-project: Alpaca
-group: Llama-Instruct
-model: Llama-3.1-8B-SFT-Ultrachat
-reward: Llama-3.1-8B-Skywork-RM
+project: PTLDR
+group: Llama3.1-8B-Base-PPO-Personalized
+model: Llama-3.1-8B-Base
+reward: TLDR-Llama-3.1-8B-SmallSFT-RM
 run: PPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
-# Tokenizer
+seed: 0xD1CE
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: False
+
+# Notable relations for further reference
+#
+# (1) total_steps = dataloader.num_steps * dataloader.num_epochs
+# e.g for learning rate scheduling
+# (2) num_forward_steps = dataloader.batch_size / forward_batch_size * total_steps
+# e.g. for in-reward kl_coeff scheduling
+# (3) num_communcation_rounds = total_steps / reference.update_every_n_steps
+# e.g. for communication self preference scheduling
+
+# ---------------------------------- Data ----------------------------------- #
+
 tokenizer:
   _component_: ppotune.tokenizers.hf_tokenizer
   path: ${prefix}/models/${model}/
   pad_token: <|finetune_right_pad_id|>
   max_seq_len: 2500
 
-# Dataset
 dataset:
-  _component_: ppotune.datasets.alpaca_dataset
-  source: yahma/alpaca-cleaned
+  _component_: ppotune.data.sets.tldr_dataset
+  source: RLHF-And-Friends/tldr-thematic
   split: train
+  configurations: # dist.rank -> list of themes
+    0: [loseit]
+    1: [dating_advice]
+    2: [legaladvice]
+    3: [offmychest]
+    4: [personalfinance]
+    5: [relationship_advice]
+    6: [tifu]
+    7: [Pets, dogs, cats]
 
-# Batch parameters
-batch_size: 64
-group_size: 1 # needed in GRPO. just leave it as is.
-num_steps: 10000
+dataloader:
+  _component_: ppotune.data.loaders.dataloader
+  batch_size: 64
+  num_steps: 22
+  num_epochs: 6
+
+evaluation_dataset:
+  _component_: ppotune.data.sets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
+  split: validation
+
+evaluation_dataloader:
+  _component_: ppotune.data.loaders.dataloader
+  batch_size: 8 # has to be the same as forward_batch_size
+  num_steps: 16
+
+evaluator:
+  _component_: ppotune.evaluation.reference_completion_evaluator
+  arbiter:
+    _component_: ppotune.arbiters.tldr_arbiter
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  every_n_steps: 13
+
+# PPO Optimization Batch Parameters
 ppo_epochs: 2
-ppo_batch_size: 16
-gradient_accumulation_steps: 4 # Use to increase effective batch size
-forward_batch_size: 4
+ppo_batch_size: 32
+gradient_accumulation_steps: 4
+forward_batch_size: 8
 
-# Policy / Reference Policy when adapter disabled
+
+# --------------------------------- Policy ---------------------------------- #
+#
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_response_len: 512
+  max_response_len: 58
   temperature: 0.7
   top_k: null
   model:
@@ -85,6 +136,8 @@ policy:
     output_dir: ${output_dir}/policy
     model_type: LLAMA3
 
+# ---------------------------- Advantage Model ------------------------------ #
+#
 advantage:
   _component_: ppotune.advantage.GAE
   gamma: 1
@@ -96,7 +149,8 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff: 0.01            # per token kl-penalty coefficient
+    kl_coeff: 0.1
+
     scorer:
       _component_: ppotune.model.LoRAModel
 
@@ -118,34 +172,36 @@ advantage:
         # (Q)LoRA
         lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
         apply_lora_to_mlp: True
-        apply_lora_to_output: = True
+        apply_lora_to_output: True
         lora_rank: 16
         lora_alpha: 32
         lora_dropout: 0.0
         quantize_base: False
 
-seed: 0xD1CE
-shuffle: True
 
+# ---------------------------- Reference Model ------------------------------ #
+#
+reference:
+  _component_: ppotune.comm.distributed_policy_mixture
+  update_every_n_steps: 13
+  protocol:
+    _component_: ppotune.comm.static_protocol
+    weightage:
+      _component_: ppotune.comm.uniform_weightage
+      self_preference: 0.6 # may be scheduled with volatile.linearly_scheduled
+
+
+# --------------------------------- Other ----------------------------------- #
+#
 optimizer:
   _component_: bitsandbytes.optim.PagedAdamW
   lr: 1e-4
 
 dtype: bf16 # | fp32 | fp16 is not supported
 
-sampler:
-  _component_: torch.utils.data.DistributedSampler
-
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
-  coeff: 0.00
-
-reference_model:
-  _component_: ppotune.dist.DistributedPolicyMixture
-  # Regulates probability mass given to self-reference acc. to formula
-  # ref = self_preference * self_ref + (1 - self_preference) * others_ref.mean()
-  # Needed in cooperative setup. In single-agent setup set to null
-  self_preference: null 
+  coeff: 0.0
 
 # PPO Loss
 # clipping hyperparameter
@@ -158,6 +214,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
-
-log_every_n_steps: 1
-update_ref_policy_every_n_steps: 13
+  additional_info: ${dataset.configurations}

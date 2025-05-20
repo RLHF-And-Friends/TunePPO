@@ -4,6 +4,7 @@ name = "ppo-tune"
 version = "0.0.1"
 authors = [
     {name = "Arkadiy Vladimirov", email = "ark.vladimirov@outlook.com"},
+	{name = "Evgeny Gurov", email = "evgurovv@gmail.com"},
 ]
 requires-python = ">=3.10"
 dependencies = [
