@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Mistral 7B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Mistral 7B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -18,7 +18,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_mistral_7b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/mistral_7b_ppo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -40,6 +40,10 @@ output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
 
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: False
+
 # Notable relations for further reference
 #
 # (1) total_steps = dataloader.num_steps * dataloader.num_epochs
@@ -59,18 +63,22 @@ tokenizer:
 
 dataset:
   _component_: ppotune.data.sets.tldr_dataset
-  # source: RLHF-And-Friends/tldr-ppo
   source: RLHF-And-Friends/tldr-thematic
   split: train
   configurations: # dist.rank -> list of themes
-    0: [legaladvice]
-    1: [personalfinance]
+    0: [loseit]
+    1: [dating_advice]
+    2: [legaladvice]
+    3: [offmychest]
+    4: [personalfinance]
+    5: [relationship_advice]
+    6: [tifu]
+    7: [Pets, dogs, cats]
 
 dataloader:
   _component_: ppotune.data.loaders.dataloader
-  # _component_: ppotune.data.loaders.distributed_dataloader
   batch_size: 64
-  num_steps: 26
+  num_steps: 22
   num_epochs: 6
 
 evaluation_dataset:
@@ -144,11 +152,7 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff:
-      _component_: ppotune.volatile.linearly_scheduled
-      start: 0.01
-      end: 1.0
-      steps: 1248 # num_forward_steps (2)
+    kl_coeff: 0.1
 
     scorer:
       _component_: ppotune.model.LoRAModel
@@ -170,7 +174,7 @@ advantage:
         # (Q)LoRA
         lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
         apply_lora_to_mlp: True
-        apply_lora_to_output: = True
+        apply_lora_to_output: True
         lora_rank: 16
         lora_alpha: 32
         lora_dropout: 0.0
@@ -186,11 +190,7 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference:
-        _component_: ppotune.volatile.linearly_scheduled
-        start: 1.0
-        end: 0.0
-        steps: 13 # num_communcation_rounds (3) + initialization
+      self_preference: 0.6 # may be scheduled with volatile.linearly_scheduled
 
 
 # --------------------------------- Other ----------------------------------- #
@@ -216,3 +216,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
+  additional_info: ${dataset.configurations}
