@@ -17,38 +17,49 @@ class HelpsteerDataset(Dataset):
     def __init__(
         self,
         source: str,
-        tokenizer: ModelTokenizer,
         message_transform: Transform,
         configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
         filter_fn: tp.Optional[tp.Callable] = None,
+        max_tokens: tp.Optional[int] = None,
         **load_dataset_kwargs
     ) -> None:
+
         self.data = load_dataset_with_configurations(
             source,
             configurations,
             **load_dataset_kwargs
         )
-
         self._message_transform = message_transform
-        self._tokenizer = tokenizer
+        self._max_tokens = max_tokens
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
             log.debug(f"Dataset length after filtering: {self.__len__()}")
 
+    def setup(self, tokenizer: ModelTokenizer) -> None:
+        self.tokenizer = tokenizer
+        if self._max_tokens is not None:
+            filter_fn = partial(
+                filter_by_length,
+                tokenizer=self.tokenizer,
+                message_transform=self._message_transform,
+                max_tokens=self._max_tokens
+            )
+            self.data = self.data.filter(filter_fn)
+
     def __getitem__(self, index):
         sample = self.data[index]
         response = sample["best_response"]
-        
+
         messages = self._message_transform(sample)
-        
-        tokens = self._tokenizer.tokenize_messages(
+
+        tokens = self.tokenizer.tokenize_messages(
             messages["messages"],
             add_generation_prompt = True,
         )
-        
+
         return {"tokens": tokens, "completion": response}
-    
+
     def __len__(self):
         return len(self.data)
 
@@ -72,34 +83,21 @@ def filter_by_length(
 # =================================================================================================
 
 def helpsteer_dataset(
-    tokenizer: ModelTokenizer,
     source: str,
     configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
-    max_input_tokens: tp.Optional[int] = None,
+    max_tokens: tp.Optional[int] = None,
     **load_dataset_kwargs
 ) -> HelpsteerDataset:
-    
+
     message_transform = OpenAIToMessages(
         train_on_input=True,
         column_map={"messages": "context"},
     )
-    
-    if max_input_tokens is not None:
-        filter_fn = partial(
-            filter_by_length,
-            tokenizer=tokenizer,
-            message_transform=message_transform,
-            max_tokens=max_input_tokens
-        )
-    else:
-        filter_fn = None
 
     return HelpsteerDataset(
         source=source,
-        tokenizer=tokenizer,
         message_transform=message_transform,
         configurations=configurations,
-        filter_fn=filter_fn,
+        max_tokens = max_tokens,
         **load_dataset_kwargs
     )
-        

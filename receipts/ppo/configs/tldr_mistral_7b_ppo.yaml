@@ -73,23 +73,42 @@ dataloader:
   num_steps: 26
   num_epochs: 6
 
-evaluation_dataset:
-  _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
-  split: validation
-
-evaluation_dataloader:
-  _component_: ppotune.data.loaders.dataloader
-  batch_size: 8 # has to be the same as forward_batch_size
-  num_steps: 16
-
 evaluator:
-  _component_: ppotune.evaluation.reference_completion_evaluator
-  arbiter:
-    _component_: ppotune.arbiters.tldr_arbiter
-    base_url: https://api.deepinfra.com/v1/openai
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-  every_n_steps: 13
+  _component_: ppotune.evaluation.evaluation_group
+  evaluators:
+    # global evaluation
+    - _component_: ppotune.evaluation.reference_completion_evaluator
+      tag: global
+      arbiter:
+        _component_: ppotune.arbiters.tldr_arbiter
+        base_url: https://api.deepinfra.com/v1/openai
+        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      every_n_steps: 13
+      dataset:
+        _component_: ppotune.data.sets.tldr_dataset
+        source: RLHF-And-Friends/tldr-ppo
+        split: validation
+      dataloader_config:
+        batch_size: 8 # has to be the same as forward_batch_size
+        num_steps: 16
+    # local evaluation
+    - _component_: ppotune.evaluation.reference_completion_evaluator
+      tag: local
+      arbiter:
+        _component_: ppotune.arbiters.tldr_arbiter
+        base_url: https://api.deepinfra.com/v1/openai
+        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      every_n_steps: 13
+      dataset:
+        _component_: ppotune.data.sets.tldr_dataset
+        source: RLHF-And-Friends/tldr-thematic
+        split: validation
+        configurations: # dist.rank -> list of themes
+          0: [legaladvice]
+          1: [personalfinance]
+      dataloader_config:
+        batch_size: 8 # has to be the same as forward_batch_size
+        num_steps: 16
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2

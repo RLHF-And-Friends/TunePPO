@@ -2,8 +2,6 @@ import typing as tp
 
 from ppotune.data.sets.qa import QADataset, QAProblem, QATransform
 
-from torchtune.modules.transforms.tokenizers import ModelTokenizer
-
 
 class AlpacaTransform(QATransform):
     def __call__(self, sample: tp.Mapping[str, tp.Any]) -> QAProblem:
@@ -15,13 +13,11 @@ class AlpacaTransform(QATransform):
 
 
 def alpaca_dataset(
-    tokenizer: ModelTokenizer,
     source: str,
     **load_dataset_kwargs: tp.Dict[str, tp.Any],
 ) -> QADataset:
 
     ds = QADataset(
-        tokenizer=tokenizer,
         source=source,
         sample_transform=AlpacaTransform(),
         add_generation_prompt=True,

@@ -1,6 +1,7 @@
 import torch
 import torch.distributed as dist
 
+from dataclasses import dataclass
 from torch.utils.data import DataLoader, Dataset
 from torchtune.modules.transforms.tokenizers import ModelTokenizer
 
@@ -11,6 +12,46 @@ from ppotune.data.samplers import (
     GroupedSampler,
     PermutationSampler
 )
+
+
+@dataclass
+class DataloaderConfig:
+    num_steps: int
+    batch_size: int
+    group_size: int = 1
+    num_epochs: int = 1
+    distributed: bool = False
+
+
+def build_dataloader(
+    dataset: Dataset,
+    num_steps: int,
+    batch_size: int,
+    group_size: int = 1,
+    num_epochs: int = 1,
+    distributed: bool = False,
+    seed: int = 0
+) -> DataLoader:
+    if distributed:
+        return distributed_dataloader(
+            tokenizer   = dataset.tokenizer,
+            dataset     = dataset,
+            num_steps   = num_steps,
+            batch_size  = batch_size,
+            group_size  = group_size,
+            num_epochs  = num_epochs,
+            seed        = seed
+        )
+    else:
+        return dataloader(
+            tokenizer   = dataset.tokenizer,
+            dataset     = dataset,
+            num_steps   = num_steps,
+            batch_size  = batch_size,
+            group_size  = group_size,
+            num_epochs  = num_epochs,
+            seed        = seed
+        )
 
 
 def dataloader(

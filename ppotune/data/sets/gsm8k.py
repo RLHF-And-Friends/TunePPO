@@ -60,8 +60,6 @@ class GSM8KEval(QATransform): # TODO: DEPRECATE
 
 
 def gsm8k_dataset(
-    tokenizer: ModelTokenizer,
-    *,
     split: str = "train",
     prompt_template: tp.Optional[PromptTemplate] = None,
     **load_dataset_kwargs: tp.Dict[str, tp.Any],
@@ -70,7 +68,6 @@ def gsm8k_dataset(
     GSM8k dataset from OpenAI.
     """
     return QADataset(
-        tokenizer=tokenizer,
         source="openai/gsm8k",
         sample_transform=GSM8K(),
         system_prompt=GSM8K_SYSTEM_PROMPT,
@@ -81,38 +78,30 @@ def gsm8k_dataset(
     )
 
 def chat_gsm8k_dataset(
-    tokenizer: ModelTokenizer,
-    *,
     split: str = "train"
 ) -> QADataset:
     """
     GSM8K dataset for chat models.
     """
     return gsm8k_dataset(
-        tokenizer,
         split=split,
         prompt_template=None
     )
 
 
 def plain_gsm8k_dataset(
-    tokenizer: ModelTokenizer,
-    *,
     split: str = "train"
 ) -> QADataset:
     """
     GSM8K dataset for non-chat models.
     """
     return gsm8k_dataset(
-        tokenizer,
         split=split,
         prompt_template=GSM8K_PROMPT_TEMPLATE
     )
 
 
 def eval_gsm8k_dataset( # TODO: DEPRECATE
-    tokenizer: ModelTokenizer,
-    *,
     split: str = "test",
     **load_dataset_kwargs: tp.Dict[str, tp.Any],
 ) -> QADataset:
@@ -120,7 +109,6 @@ def eval_gsm8k_dataset( # TODO: DEPRECATE
     GSM8k dataset for evaluation.
     """
     return QADataset(
-        tokenizer=tokenizer,
         source="openai/gsm8k",
         sample_transform=GSM8KEval(),
         system_prompt=GSM8K_SYSTEM_PROMPT,
