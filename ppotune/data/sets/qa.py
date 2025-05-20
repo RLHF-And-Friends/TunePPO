@@ -25,8 +25,6 @@ class QADataset(Dataset):
     """
     def __init__(
         self,
-        tokenizer: ModelTokenizer,
-        *,
         source: str,
         sample_transform: QATransform,
         filter_fn: tp.Optional[tp.Callable] = None,
@@ -36,14 +34,17 @@ class QADataset(Dataset):
         **load_dataset_kwargs: tp.Dict[str, tp.Any],
     ) -> None:
 
-        self.tokenizer = tokenizer
         self.sample_transform = sample_transform
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
         self.add_generation_prompt = add_generation_prompt
         self.data = load_dataset(source, **load_dataset_kwargs)
+
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
+
+    def setup(self, tokenizer: ModelTokenizer) -> None:
+        self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.data)

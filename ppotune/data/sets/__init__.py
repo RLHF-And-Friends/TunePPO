@@ -1,3 +1,13 @@
+# TODO:
+# * Bring all datasets to the unified interface i.e./
+# * Protocol or ABC HfTokenDataset that
+#   * loads from hub (hence the "source" argument and such
+#   * has tokenizer field/property
+#   * yields tokens
+#   * is Dataset (naturally)
+#   * (?) has /build or load method that yileds dataloader based on config?
+
+
 from ppotune.data.sets.gsm8k import (
     gsm8k_dataset,
     chat_gsm8k_dataset,

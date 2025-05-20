@@ -38,12 +38,10 @@ class WandbLogger(MetricLoggerInterface):
 
         self._log_buffer: tp.Dict[str, list[torch.Tensor]] = {}
 
-        self._completions = wandb.Table(
+        self._completions = wandb.Table( # TODO: deprecate in favor of table reference
             columns=["completion", "score"]
         )
-        self._references = wandb.Table(
-            columns=["reference", "completion", "chosen"]
-        )
+        self._table_reference: tp.Dict[str, wandb.Table] = {}
 
         wandb.init(
             dir=dir,
@@ -84,22 +82,21 @@ class WandbLogger(MetricLoggerInterface):
         for name in payload:
             self.collect(name, payload[name])
 
+    # TODO: deprecate in favor of table refernce. add collect_table_row method instead
     def collect_completion(self, completion: str, score: torch.Tensor) -> None:
         """
         Collect completion and score.
         """
         self._completions.add_data(completion, score)
 
-    def collect_reference(
+    def collect_table(
         self,
-        reference: str,
-        completion: str,
-        chosen: int
+        name: str,
+        columns: tp.Dict[str, tp.Iterable[tp.Any]]
     ) -> None:
-        """
-        Collect reference completion, validated completion and chosen id.
-        """
-        self._references.add_data(reference, completion, chosen)
+        self._table_reference[name] = wandb.Table(columns=list(columns.keys()))
+        for row in zip(*columns.values()):
+            self._table_reference[name].add_data(*row)
 
     def flush(self, step: int) -> None:
         """
@@ -110,17 +107,17 @@ class WandbLogger(MetricLoggerInterface):
 
         self._log_buffer = {}
 
+        for name, table in self._table_reference.items():
+            self.log(name, table, step)
+
+        self._table_reference = {}
+
         if len(self._completions.data) != 0:
             self.log("completions", self._completions, step)
             self._completions = wandb.Table(columns=[
                 "completion", "score"
             ])
 
-        if len(self._references.data) != 0:
-            self.log("references", self._references, step)
-            self._references = wandb.Table(columns=[
-                "reference", "completion", "chosen"
-            ])
 
     def close(self) -> None:
         wandb.finish()

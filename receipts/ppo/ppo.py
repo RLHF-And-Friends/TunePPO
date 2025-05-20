@@ -1,7 +1,5 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import typing as tp
-
 import sys
 
 from functools import partial
@@ -135,10 +133,8 @@ class PPORecipe(FTRecipeInterface):
         self._tokenizer: PreTrainedTokenizerBase | ModelTokenizer = instantiate(
             cfg.tokenizer
         )
-        dataset: Dataset = instantiate(
-            cfg.dataset,
-            tokenizer=self._tokenizer
-        )
+        dataset: Dataset = instantiate(cfg.dataset)
+        dataset.setup(self._tokenizer)
         self.dataloader: DataLoader = instantiate(
             cfg.dataloader,
             tokenizer=self._tokenizer,
@@ -147,21 +143,10 @@ class PPORecipe(FTRecipeInterface):
         )
         self._setup_batch_sizes(cfg)
 
-        # setup evaluation
-        evaluation_dataset: tp.Optional[Dataset] = instantiate(
-            cfg.get("evaluation_dataset", None),
-            tokenizer=self._tokenizer
-        )
-        evaluation_dataloader: tp.Opeional[DataLoader] = instantiate(
-            cfg.get("evaluation_dataloader", None),
+        self.eval: Evaluator = instantiate(cfg.evaluator)
+        self.eval.setup(
             tokenizer=self._tokenizer,
-            dataset=evaluation_dataset,
             seed=self.seed
-        )
-        self.eval: tp.Optional[Evaluator] = instantiate(
-            cfg.get("evaluator", None),
-            tokenizer=self._tokenizer,
-            dataloader=evaluation_dataloader,
         )
 
         # setup policy and advantage model
@@ -339,9 +324,8 @@ class PPORecipe(FTRecipeInterface):
         """
         self._optimizer.zero_grad()
 
-        if self.eval:
-            self.eval(self.policy)
-            wandb_logger.flush(step=0)
+        self.eval(self.policy)
+        wandb_logger.flush(step=0)
 
         for step, batch in tqdm(
             enumerate(self.dataloader, start=1),
@@ -380,8 +364,7 @@ class PPORecipe(FTRecipeInterface):
                     self._optimizer.step()
                     self._optimizer.zero_grad(set_to_none=True)
 
-            if self.eval:
-                self.eval(self.policy, step)
+            self.eval(self.policy, step)
 
             self._ref_policy.gather(trajectory)
             self._ref_policy.update(step)

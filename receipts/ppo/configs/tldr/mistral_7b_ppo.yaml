@@ -72,16 +72,6 @@ dataloader:
   num_steps: 26
   num_epochs: 6
 
-evaluation_dataset:
-  _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
-  split: validation
-
-evaluation_dataloader:
-  _component_: ppotune.data.loaders.dataloader
-  batch_size: 8 # has to be the same as forward_batch_size
-  num_steps: 16
-
 evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
@@ -89,6 +79,14 @@ evaluator:
     base_url: https://api.deepinfra.com/v1/openai
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
   every_n_steps: 13
+  dataset:
+    _component_: ppotune.data.sets.tldr_dataset
+    source: RLHF-And-Friends/tldr-ppo
+    split: validation
+  dataloader_config:
+    batch_size: 8 # has to be the same as forward_batch_size
+    num_steps: 16
+  empty_cache_after_generation: True # empty cache after each forward
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2
@@ -143,11 +141,7 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff:
-      _component_: ppotune.volatile.linearly_scheduled
-      start: 0.01
-      end: 1.0
-      steps: 1248 # num_forward_steps (2)
+    kl_coeff: 0.1
 
     scorer:
       _component_: ppotune.model.LoRAModel
@@ -185,11 +179,7 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference:
-        _component_: ppotune.volatile.linearly_scheduled
-        start: 1.0
-        end: 0.0
-        steps: 13 # num_communcation_rounds (3) + initialization
+      self_preference: 1.0
 
 
 # --------------------------------- Other ----------------------------------- #
