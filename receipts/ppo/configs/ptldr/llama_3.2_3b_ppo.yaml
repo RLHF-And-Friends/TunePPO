@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Mistral 7B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.2-3B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,19 +6,16 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (TLDR-RM) tune download RLHF-And-Friends/TLDR-Mistral-7B-RM --output-dir ~/.tune/models/TLDR-Mistral-7B-RM/
-#   b. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Mistral-7B-SmallSFT-RM --output-dir ~/.tune/models/TLDR-Mistral-7B-SmallSFT-RM/
-# 2. Get Mistral-7B model
-#   a. (Base) tune download mistral-community/Mistral-7B-v0.2 --output-dir ~/.tune/models/Mistral-7B-Base/
-#   b. (Instruct) tune download mistralai/Mistral-7B-Instruct-v0.2 --output-dir ~/.tune/models/Mistral-7B-Instruct/
-#   c. (SFT) tune download RLHF-And-Friends/SFT-TLDR-Mistral-7B-v0.2 --output-dir ~/.tune/models/Mistral-7B-SFT/
-#   d. (SmallSFT) tune download RLHF-And-Friends/TLDR-Mistral-7B-SmallSFT --output-dir ~/.tune/models/Mistral-7B-SmallSFT/
+#   a. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT-RM --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT-RM/
+# 2. Get Llama3.2-3B model
+#   a. (Base) tune download meta-llama/Llama-3.2-3B --output-dir ~/.tune/models/Llama-3.2-3B-Base/
+#   b. (SmallSFT) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr_mistral_7b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/llama_3.2_3b_ppo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -30,15 +27,19 @@
 
 prefix: ~/.tune
 
-project: TLDR
-group: Mistral-Base-PPO-FedAvg
-model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
-reward: TLDR-Mistral-7B-SmallSFT-RM # | TLDR-Mistral-7B-RM
+project: PTLDR
+group: Llama3.2-3B-Base-PPO-Personalized
+model: Llama-3.2-3B-Base
+reward: Llama-3.2-3B-SmallSFT-RM
 run: PPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: True
 
 # Notable relations for further reference
 #
@@ -53,38 +54,68 @@ seed: 0xD1CE
 # ---------------------------------- Data ----------------------------------- #
 #
 tokenizer:
-  _component_: ppotune.tokenizers.mistral2_tokenizer
-  path: ${prefix}/models/${model}/tokenizer.model
+  _component_: ppotune.tokenizers.hf_tokenizer
+  path: ${prefix}/models/${model}/
+  pad_token: <|finetune_right_pad_id|>
   max_seq_len: 2500
 
 dataset:
   _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
+  source: RLHF-And-Friends/tldr-thematic
   split: train
+  configurations: # dist.rank -> list of themes
+    0: [loseit]
+    1: [dating_advice]
+    2: [legaladvice]
+    3: [offmychest]
+    4: [personalfinance]
+    5: [relationship_advice]
+    6: [tifu]
+    7: [Pets, dogs, cats]
 
 dataloader:
-  _component_: ppotune.data.loaders.distributed_dataloader
+  _component_: ppotune.data.loaders.dataloader
+  # _component_: ppotune.data.loaders.distributed_dataloader
   batch_size: 64
-  num_steps: 26
+  num_steps: 22
   num_epochs: 6
 
-evaluation_dataset:
-  _component_: ppotune.data.sets.tldr_dataset
-  source: RLHF-And-Friends/tldr-ppo
-  split: validation
-
-evaluation_dataloader:
-  _component_: ppotune.data.loaders.dataloader
-  batch_size: 8 # has to be the same as forward_batch_size
-  num_steps: 16
-
 evaluator:
-  _component_: ppotune.evaluation.reference_completion_evaluator
-  arbiter:
-    _component_: ppotune.arbiters.tldr_arbiter
-    base_url: https://api.deepinfra.com/v1/openai
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-  every_n_steps: 13
+  _component_: ppotune.evaluation.evaluation_group
+  evaluators:
+    # global evaluation
+    - _component_: ppotune.evaluation.reference_completion_evaluator
+      tag: global
+      arbiter:
+        _component_: ppotune.arbiters.tldr_arbiter
+        base_url: https://api.deepinfra.com/v1/openai
+        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      every_n_steps: 13
+      dataset:
+        _component_: ppotune.data.sets.tldr_dataset
+        source: RLHF-And-Friends/tldr-ppo
+        split: validation
+      dataloader_config:
+        batch_size: 8 # has to be the same as forward_batch_size
+        num_steps: 16
+      empty_cache_after_generation: True # empty cache after each forward
+    # local evaluation
+    - _component_: ppotune.evaluation.reference_completion_evaluator
+      tag: local
+      arbiter:
+        _component_: ppotune.arbiters.tldr_arbiter
+        base_url: https://api.deepinfra.com/v1/openai
+        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+      every_n_steps: 13
+      dataset:
+        _component_: ppotune.data.sets.tldr_dataset
+        source: RLHF-And-Friends/tldr-thematic
+        split: validation
+        configurations: ${dataset.configurations}
+      dataloader_config:
+        batch_size: 8 # has to be the same as forward_batch_size
+        num_steps: 16
+      empty_cache_after_generation: True # empty cache after each forward
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2
@@ -102,7 +133,7 @@ policy:
   temperature: 0.7
   top_k: null
   model:
-    _component_: torchtune.models.mistral.lora_mistral_7b
+    _component_: torchtune.models.llama3_2.lora_llama3_2_3b
     # (Q)LoRA
     lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
     apply_lora_to_mlp: True
@@ -116,14 +147,13 @@ policy:
     checkpoint_dir: ${prefix}/models/${model}/
     checkpoint_files:
       [
-        "model-00001-of-00003.safetensors",
-        "model-00002-of-00003.safetensors",
-        "model-00003-of-00003.safetensors",
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
       ]
     # this is the only place where you should update `recipe_checkpoint` if resuming training
     recipe_checkpoint: null
     output_dir: ${output_dir}/policy
-    model_type: MISTRAL
+    model_type: LLAMA3
 
 
 # ---------------------------- Advantage Model ------------------------------ #
@@ -149,19 +179,18 @@ advantage:
         checkpoint_dir: ${prefix}/models/${reward}/
         checkpoint_files:
           [
-            "model-00001-of-00003.safetensors",
-            "model-00002-of-00003.safetensors",
-            "model-00003-of-00003.safetensors",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
           ]
         output_dir: ${output_dir}/scorer
         model_type: REWARD
 
       model:
-        _component_: torchtune.models.mistral.lora_mistral_reward_7b
+        _component_: ppotune.models.llama3_2.lora_llama3_2_3b_reward
         # (Q)LoRA
         lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
         apply_lora_to_mlp: True
-        apply_lora_to_output: = True
+        apply_lora_to_output: True
         lora_rank: 16
         lora_alpha: 32
         lora_dropout: 0.0
@@ -171,13 +200,13 @@ advantage:
 # ---------------------------- Reference Model ------------------------------ #
 #
 reference:
-  _component_: ppotune.comm.distributed_weight_mixture
+  _component_: ppotune.comm.distributed_policy_mixture
   update_every_n_steps: 13
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference: null
+      self_preference: 1.0 # may be scheduled with volatile.linearly_scheduled
 
 
 # --------------------------------- Other ----------------------------------- #
@@ -187,8 +216,6 @@ optimizer:
   lr: 1e-4
 
 dtype: bf16 # | fp32 | fp16 is not supported
-
-empty_cache_after_generation: True
 
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
@@ -205,3 +232,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
+  additional_info: ${dataset.configurations}

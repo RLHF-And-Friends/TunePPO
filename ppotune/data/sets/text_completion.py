@@ -1,5 +1,6 @@
 import typing as tp
 
+from functools import partial
 from torch.utils.data import Dataset
 
 from torchtune.modules.tokenizers import ModelTokenizer
@@ -27,26 +28,41 @@ class TextCompletionDataset(Dataset):
     """
     def __init__(
         self,
-        tokenizer: ModelTokenizer,
-        *,
         source: str,
-        configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
         sample_transform: TCTransform,
+        configurations: tp.Optional[str | tp.List[str] | tp.Dict[int, tp.List[str]]] = None,
+        max_tokens: tp.Optional[int] = None,
         filter_fn: tp.Optional[tp.Callable] = None,
         **load_dataset_kwargs: tp.Dict[str, tp.Any],
     ) -> None:
+
         self.data = load_dataset_with_configurations(
             source,
             configurations,
             **load_dataset_kwargs
         )
-
-        self.tokenizer = tokenizer
         self.sample_transform = sample_transform
+        self._max_tokens = max_tokens
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
             log.debug(f"Dataset length after filtering: {self.__len__()}")
+
+    def setup(self, tokenizer: ModelTokenizer) -> None:
+        self.tokenizer = tokenizer
+
+        if self._max_tokens is not None:
+            filter_fn = partial(
+                shorter_than_max_tokens,
+                tokenizer=self.tokenizer,
+                sample_transform=self._sample_transform,
+                max_tokens=self._max_tokens
+            )
+            self.data = self.data.filter(filter_fn)
+            log.debug(
+                f"Dataset length after filtering inputs longer than {self._max_tokens}: "
+                f"{self.__len__()}"
+            )
 
     def __len__(self):
         return len(self.data)
@@ -60,3 +76,18 @@ class TextCompletionDataset(Dataset):
         tokens = tokens[:self.tokenizer.max_seq_len]
 
         return {"tokens": tokens, "completion": completion}
+
+
+# Filtering function
+# =================================================================================================
+
+def shorter_than_max_tokens(
+    sample,
+    tokenizer: ModelTokenizer,
+    sample_transform: TCTransform,
+    max_tokens: int
+) -> None:
+    prompt = sample_transform(sample)["prompt"]
+    tokens = tokenizer.encode(prompt)
+    return len(tokens) < max_tokens
+

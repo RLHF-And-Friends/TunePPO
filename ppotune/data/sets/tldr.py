@@ -1,12 +1,10 @@
 import typing as tp
-import torch.distributed as dist
 
 from ppotune.data.sets.text_completion import (
     TCTransform,
     TextCompletion,
     TextCompletionDataset
 )
-from torchtune.modules.transforms.tokenizers import ModelTokenizer
 
 
 class TLDRTransform(TCTransform):
@@ -18,8 +16,6 @@ class TLDRTransform(TCTransform):
 
 
 def tldr_dataset(
-    tokenizer: ModelTokenizer,
-    *,
     source: str = "trl-lib/tldr",
     split: str = "train",
     configurations: tp.Optional[str | list[str] | tp.Dict[int, list[str]]] = None,
@@ -27,7 +23,6 @@ def tldr_dataset(
 ) -> TextCompletionDataset:
 
     return TextCompletionDataset(
-        tokenizer=tokenizer,
         source=source,
         configurations=configurations,
         sample_transform=TLDRTransform(),
