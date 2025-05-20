@@ -103,9 +103,7 @@ evaluator:
         _component_: ppotune.data.sets.tldr_dataset
         source: RLHF-And-Friends/tldr-thematic
         split: validation
-        configurations: # dist.rank -> list of themes
-          0: [legaladvice]
-          1: [personalfinance]
+        configurations: ${dataset.configurations}
       dataloader_config:
         batch_size: 8 # has to be the same as forward_batch_size
         num_steps: 16
@@ -163,11 +161,7 @@ advantage:
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff:
-      _component_: ppotune.volatile.linearly_scheduled
-      start: 0.01
-      end: 1.0
-      steps: 1248 # num_forward_steps (2)
+    kl_coeff: 0.1
 
     scorer:
       _component_: ppotune.model.LoRAModel
@@ -205,11 +199,7 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference:
-        _component_: ppotune.volatile.linearly_scheduled
-        start: 1.0
-        end: 0.0
-        steps: 13 # num_communcation_rounds (3) + initialization
+      self_preference: 0.6
 
 
 # --------------------------------- Other ----------------------------------- #
@@ -235,3 +225,4 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
+  additional_info: ${dataset.configurations}

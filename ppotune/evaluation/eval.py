@@ -70,13 +70,15 @@ class ReferenceCompletionEvaluator(Evaluator):
         every_n_steps: int,
         dataset: Dataset,
         dataloader_config: DataloaderConfig,
-        tag: str = "validation"
+        tag: str = "validation",
+        num_logs: tp.Optional[int] = None
     ) -> None:
         self._arbiter = arbiter
         self._every_n_steps = every_n_steps
         self._dataset = dataset
         self._loader_config = dataloader_config
         self._tag = tag
+        self._num_logs = num_logs
 
     def setup(
         self,
@@ -93,6 +95,8 @@ class ReferenceCompletionEvaluator(Evaluator):
             seed=seed,
             **self._loader_config,
         )
+        if self._num_logs is None:
+            self._num_logs = self._dataloader.batch_size
 
     def __call__(
         self,
@@ -129,13 +133,11 @@ class ReferenceCompletionEvaluator(Evaluator):
         valid = wins != -1
         winrate = wins[valid].float().mean()
         logger.collect(f"{self._tag}-winrate", winrate)
-
-        for idx in range(self._dataloader.batch_size):
-            logger.collect_reference(
-                reference=completions[idx][0],
-                completion=completions[idx][1],
-                chosen=wins[idx]
-            )
+        logger.collect_table(f"{self._tag}-reference", {
+            "reference":    [c[0] for c in completions[:self._num_logs]],
+            "completion":   [c[1] for c in completions[:self._num_logs]],
+            "chosen":       wins[0:self._num_logs]
+        })
 
 
 def evaluation_group(evaluators: tp.List[Evaluator]) -> EvaluationGroup:
@@ -147,6 +149,7 @@ def reference_completion_evaluator(
         dataset: Dataset,
         dataloader_config: DataloaderConfig,
         tag: str = "validation",
+        num_logs: tp.Optional[int] = None,
 ) -> ReferenceCompletionEvaluator:
 
     return ReferenceCompletionEvaluator(
@@ -154,5 +157,6 @@ def reference_completion_evaluator(
         every_n_steps=every_n_steps,
         dataset=dataset,
         dataloader_config=dataloader_config,
-        tag=tag
+        tag=tag,
+        num_logs=num_logs,
     )
