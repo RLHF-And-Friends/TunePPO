@@ -132,7 +132,6 @@ class DistributedLoRAWeightMixture(DistributedMixture):
             peer_weights = all_gather_even(linear.weight)
             linear.weight.data.copy_(self._protocol(peer_weights))
 
-        torch.cuda.empty_cache()
         merge_lora_adapter(self._policy)
         clear_lora_adapter(self._policy)
         self._protocol.update()
