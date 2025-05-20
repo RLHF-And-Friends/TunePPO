@@ -25,7 +25,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
 from ppotune.advantage import IAdvantageModel
-from ppotune.comm.mixture import DistributedPolicyMixture
+from ppotune.comm.mixture import DistributedMixture
 from ppotune.config import instantiate
 from ppotune.data.types import (
     PPOTrajectoryStats,
@@ -168,7 +168,7 @@ class PPORecipe(FTRecipeInterface):
                 self.advantage.parameters()
         ))
         # instantiate reference policy
-        self._ref_policy: DistributedPolicyMixture = instantiate(
+        self._ref_policy: DistributedMixture = instantiate(
             cfg.reference,
             local_policy=self.policy
         )
@@ -367,7 +367,7 @@ class PPORecipe(FTRecipeInterface):
             self.eval(self.policy, step)
 
             self._ref_policy.gather(trajectory)
-            self._ref_policy.update(step)
+            self._ref_policy.update_at(step)
 
             wandb_logger.flush(step=step)
             self.cleanup_after_step(trajectory)
