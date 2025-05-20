@@ -59,6 +59,10 @@ class TextCompletionDataset(Dataset):
                 max_tokens=self._max_tokens
             )
             self.data = self.data.filter(filter_fn)
+            log.debug(
+                f"Dataset length after filtering inputs longer than {self._max_tokens}: "
+                f"{self.__len__()}"
+            )
 
     def __len__(self):
         return len(self.data)

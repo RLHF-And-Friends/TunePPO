@@ -73,39 +73,20 @@ dataloader:
   num_epochs: 6
 
 evaluator:
-  _component_: ppotune.evaluation.evaluation_group
-  evaluators:
-    # global evaluation
-    - _component_: ppotune.evaluation.reference_completion_evaluator
-      tag: global
-      arbiter:
-        _component_: ppotune.arbiters.tldr_arbiter
-        base_url: https://api.deepinfra.com/v1/openai
-        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-      every_n_steps: 13
-      dataset:
-        _component_: ppotune.data.sets.tldr_dataset
-        source: RLHF-And-Friends/tldr-ppo
-        split: validation
-      dataloader_config:
-        batch_size: 8 # has to be the same as forward_batch_size
-        num_steps: 16
-    # local evaluation
-    - _component_: ppotune.evaluation.reference_completion_evaluator
-      tag: local
-      arbiter:
-        _component_: ppotune.arbiters.tldr_arbiter
-        base_url: https://api.deepinfra.com/v1/openai
-        model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-      every_n_steps: 13
-      dataset:
-        _component_: ppotune.data.sets.tldr_dataset
-        source: RLHF-And-Friends/tldr-thematic
-        split: validation
-        configurations: ${dataset.configurations}
-      dataloader_config:
-        batch_size: 8 # has to be the same as forward_batch_size
-        num_steps: 16
+  _component_: ppotune.evaluation.reference_completion_evaluator
+  arbiter:
+    _component_: ppotune.arbiters.tldr_arbiter
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  every_n_steps: 13
+  dataset:
+    _component_: ppotune.data.sets.tldr_dataset
+    source: RLHF-And-Friends/tldr-ppo
+    split: validation
+  dataloader_config:
+    batch_size: 8 # has to be the same as forward_batch_size
+    num_steps: 16
+  empty_cache_after_generation: True # empty cache after each forward
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2
@@ -198,7 +179,7 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference: 0.6
+      self_preference: 1.0
 
 
 # --------------------------------- Other ----------------------------------- #
@@ -224,4 +205,3 @@ wandb_logger:
   project: ${project}
   group: ${group}
   name: ${model}-${run}
-  additional_info: ${dataset.configurations}

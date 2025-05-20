@@ -71,7 +71,8 @@ class ReferenceCompletionEvaluator(Evaluator):
         dataset: Dataset,
         dataloader_config: DataloaderConfig,
         tag: str = "validation",
-        num_logs: tp.Optional[int] = None
+        num_logs: tp.Optional[int] = None,
+        empty_cache_after_generation: bool = False,
     ) -> None:
         self._arbiter = arbiter
         self._every_n_steps = every_n_steps
@@ -79,6 +80,7 @@ class ReferenceCompletionEvaluator(Evaluator):
         self._loader_config = dataloader_config
         self._tag = tag
         self._num_logs = num_logs
+        self._empty_cache = empty_cache_after_generation
 
     def setup(
         self,
@@ -115,6 +117,8 @@ class ReferenceCompletionEvaluator(Evaluator):
             desc=f"Evaluation ({self._tag})",
             disable=dist.get_rank() != 0
         ):
+            torch.cuda.empty_cache() if self._empty_cache else None
+
             batch["tokens"] = batch["tokens"].to(model._device)
             generated = model.generate(prompt=batch["tokens"])
 
@@ -150,6 +154,7 @@ def reference_completion_evaluator(
         dataloader_config: DataloaderConfig,
         tag: str = "validation",
         num_logs: tp.Optional[int] = None,
+        empty_cache_after_generation: bool = False
 ) -> ReferenceCompletionEvaluator:
 
     return ReferenceCompletionEvaluator(
@@ -159,4 +164,5 @@ def reference_completion_evaluator(
         dataloader_config=dataloader_config,
         tag=tag,
         num_logs=num_logs,
+        empty_cache_after_generation=empty_cache_after_generation,
     )
