@@ -63,10 +63,12 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         system_prompt: str,
         base_url: tp.Optional[str] = None,
         model: str = "gpt-4o-mini",
+        **api_request_kwargs
     ) -> None:
         self._client = OpenAI(base_url=base_url)
         self._model = model
         self._system_prompt = system_prompt
+        self._api_request_kwargs = api_request_kwargs
 
     def judge(
         self,
@@ -115,8 +117,9 @@ class RemotePairwiseArbiter(PairwiseArbiter):
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=messages,
+            **self._api_request_kwargs,
         )
-        response = completion.choices[0].message.content[-1]
+        response = completion.choices[0].message.content[-1].strip()
         if response in ["0", "1"]:
             response = int(response)
         else:

@@ -21,6 +21,7 @@ dependencies = [
 	"wandb",
 	# evaluation
 	"openai",
+	"vllm==0.8.5.post1",
 ]
 
 # --------------------------- Build Specification --------------------------- #
