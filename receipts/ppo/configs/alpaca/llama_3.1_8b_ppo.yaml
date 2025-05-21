@@ -95,7 +95,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_response_len: 256
+  max_response_len: 512
   temperature: 0.7
   top_k: null
   model:
