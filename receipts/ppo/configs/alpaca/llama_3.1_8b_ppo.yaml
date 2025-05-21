@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model for Question Answering task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,7 +6,7 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # 1. Download a reward model
-#   a. (Skywork) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2 --output-dir ~/.tune/models/Llama-3.1-8B-Skywork-RM/
+#   a. (Skywork RM) tune download Skywork/Skywork-Reward-Llama-3.1-8B-v0.2 --output-dir ~/.tune/models/Llama-3.1-8B-Skywork-RM/
 # 2. Download the policy model
 #   a. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ~/.tune/models/Llama-3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
 #   b. (SFT) tune download RLHF-And-Friends/Llama-3.1-8B-SFT-Uch --output-dir ~/.tune/models/Llama-3.1-8B-SFT-Ultrachat/
@@ -15,7 +15,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/alpaca_llama_3.1_8B_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/alpaca/llama_3.1_8b_ppo.yaml
 #
 # NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
 # updated.
@@ -25,7 +25,8 @@ prefix: ~/.tune
 
 project: Alpaca
 group: Llama-3.1-8B-PPO
-model: Llama-3.1-8B-SFT-Ultrachat
+# model: Llama-3.1-8B-SFT-Ultrachat
+model: Llama-3.1-8B-Instruct
 reward: Llama-3.1-8B-Skywork-RM
 run: PPO
 
@@ -35,7 +36,7 @@ seed: 0xD1CE
 
 # reduces training performance but helps a lot with CUDA OOMs and invalid
 # memory access errors in tight memoty setup
-empty_cache_after_generation: False
+empty_cache_after_generation: True
 
 # Notable relations for further reference
 #
@@ -56,7 +57,7 @@ tokenizer:
   max_seq_len: 2500
 
 dataset:
-  _component_: ppotune.data.sets.alpaca
+  _component_: ppotune.data.sets.alpaca_dataset
   source: RLHF-And-Friends/alpaca-cleaned
   split: train
 
@@ -66,23 +67,22 @@ dataloader:
   num_steps: 26
   num_epochs: 6
 
-evaluation_dataset:
-  _component_: ppotune.data.sets.alpaca
-  source: RLHF-And-Friends/alpaca-cleaned
-  split: validation
-
-evaluation_dataloader:
-  _component_: ppotune.data.loaders.dataloader
-  batch_size: 8 # has to be the same as forward_batch_size
-  num_steps: 16
-
 evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
-    _component_: ppotune.arbiters.tldr_arbiter
+    _component_: ppotune.arbiters.default_arbiter
     base_url: https://api.deepinfra.com/v1/openai
     model: meta-llama/Llama-3.3-70B-Instruct-Turbo
   every_n_steps: 13
+  dataset:
+    _component_: ppotune.data.sets.alpaca_dataset
+    source: RLHF-And-Friends/alpaca-cleaned
+    split: validation
+  dataloader_config:
+    batch_size: 8 # has to be the same as forward_batch_size
+    num_steps: 16
+  completion_column: answers
+  empty_cache_after_generation: True # empty cache after each forward
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2
@@ -95,7 +95,7 @@ forward_batch_size: 8
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_response_len: 58
+  max_response_len: 256
   temperature: 0.7
   top_k: null
   model:
