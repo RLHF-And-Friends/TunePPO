@@ -74,17 +74,8 @@ evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
     _component_: ppotune.arbiters.tldr_arbiter
-    base_url: http://localhost:8000/v1
-    model: Qwen/Qwen3-32B
-    # base_url: https://api.deepinfra.com/v1/openai
-    # model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-    temperature: 0.6
-    top_p: 0.95
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: True
-      top_k: 20
-      min_p: 0.0
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
   every_n_steps: 13
   dataset:
     _component_: ppotune.data.sets.tldr_dataset

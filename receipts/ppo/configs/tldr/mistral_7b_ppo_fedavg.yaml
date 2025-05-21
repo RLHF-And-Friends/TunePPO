@@ -18,7 +18,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr/mistral_7b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/tldr/mistral_7b_ppo_fedavg.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -30,8 +30,8 @@
 
 prefix: ~/.tune
 
-project: TLDR
-group: Mistral-Base-PPO
+project: TLDR-Mistral-PPO-FedAvg
+group: Mistral-Base-PPO-FedAvg
 model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
 reward: TLDR-Mistral-7B-SmallSFT-RM # | TLDR-Mistral-7B-RM
 run: PPO
@@ -76,8 +76,23 @@ evaluator:
   _component_: ppotune.evaluation.reference_completion_evaluator
   arbiter:
     _component_: ppotune.arbiters.tldr_arbiter
-    base_url: https://api.deepinfra.com/v1/openai
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    # Remote arbiter
+    # -------------------------------------------------------------------------
+    # base_url: https://api.deepinfra.com/v1/openai
+    # model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+    # -------------------------------------------------------------------------
+    # Local arbiter
+    # -------------------------------------------------------------------------
+    base_url: http://localhost:8000/v1
+    model: Qwen/Qwen3-32B
+    temperature: 0.6
+    top_p: 0.95
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: True
+      top_k: 20
+      min_p: 0.0
+    # -------------------------------------------------------------------------
   every_n_steps: 13
   dataset:
     _component_: ppotune.data.sets.tldr_dataset
@@ -173,14 +188,13 @@ advantage:
 # ---------------------------- Reference Model ------------------------------ #
 #
 reference:
-  _component_: ppotune.comm.distributed_policy_mixture
+  _component_: ppotune.comm.distributed_weight_mixture
   update_every_n_steps: 13
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference: 1.0
-
+      self_preference: null
 
 
 # --------------------------------- Other ----------------------------------- #

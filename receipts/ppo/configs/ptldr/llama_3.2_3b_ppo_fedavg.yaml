@@ -28,7 +28,7 @@
 prefix: ~/.tune
 
 project: PTLDR
-group: Llama3.2-3B-Base-PPO-Personalized-FEDAVG
+group: Llama3.2-3B-Base-PPO-Personalized-FedAvg
 model: Llama-3.2-3B-Base
 reward: Llama-3.2-3B-SmallSFT-RM
 run: PPO
