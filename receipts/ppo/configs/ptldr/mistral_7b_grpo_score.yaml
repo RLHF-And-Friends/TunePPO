@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Mistral 7B model for Personalized TL;DR task.
+# Config for single device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model for Personalized TL;DR task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -20,7 +20,7 @@
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/mistral_7b_ppo_score.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/ptldr/mistral_7b_grpo_score.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -32,11 +32,11 @@
 
 prefix: ~/.tune
 
-project: PTLDR-Mistral-PPO-ScoreBased
-group: Mistral-Base-PPO-ScoreBased
+project: PTLDR-Mistral-GRPO-ScoreBased
+group: Mistral-Base-GRPO-ScoreBased
 model: Mistral-7B-Base # | Mistral-7B-SmallSFT |  Mistral-7B-SFT | Mistral-7B-Base | Mistral-7B-Instruct
 reward: TLDR-Mistral-7B-SmallSFT-RM # | TLDR-Mistral-7B-RM
-run: PPO
+run: GRPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -80,7 +80,8 @@ dataset:
 dataloader:
   _component_: ppotune.data.loaders.dataloader
   batch_size: 64
-  num_steps: 22
+  group_size: 8 # note that the data volume is effectively /= group_size
+  num_steps: 26
   num_epochs: 6
 
 evaluator:
@@ -193,17 +194,14 @@ policy:
 # ---------------------------- Advantage Model ------------------------------ #
 #
 advantage:
-  _component_: ppotune.advantage.GAE
-  gamma: 1
-  lmbda: 0.95
-  value_coeff: 0.1
-  value_clip_range: 0.2
+  _component_: ppotune.advantage.GRAE
+  group_size: ${dataloader.group_size}
   reward:
-    _component_: ppotune.reward.PerTokenKLPenalizedRewardModel
+    _component_: ppotune.reward.LLMRewardModel
     min_response_len: 18      # would penalize generations shorter than
     penalise_no_eos: True     # would penalize generations with no eos
     reward_penalty: -3        # penalty value
-    kl_coeff: 0.1
+
     scorer:
       _component_: ppotune.model.LoRAModel
 
@@ -253,7 +251,7 @@ dtype: bf16 # | fp32 | fp16 is not supported
 
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
-  coeff: 0.0
+  coeff: 0.1 # optionally scheduled with ppotune.volatile.linearly_scheduled
 
 # PPO Loss
 # clipping hyperparameter
