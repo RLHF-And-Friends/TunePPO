@@ -8,6 +8,9 @@ from torchtune.data import Message
 from datasets import load_dataset
 
 from ppotune.data.utils import PromptTemplate, apply_prompt_template
+from torchtune import utils
+
+log = utils.get_logger("DEBUG")
 
 
 class QAProblem(tp.TypedDict):
@@ -42,6 +45,7 @@ class QADataset(Dataset):
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
+            log.debug(f"Dataset length after filtering: {self.__len__()}")
 
     def setup(self, tokenizer: ModelTokenizer) -> None:
         self.tokenizer = tokenizer
@@ -51,7 +55,7 @@ class QADataset(Dataset):
 
     def _tokenize_question(self, question: str) -> tp.List[int]:
         """
-        Tokenize a question according to dataset format defined in temrms of
+        Tokenize a question according to dataset format defined in terms of
         optional system prompt and prompt template for non-chat models.
         """
         messages = []
