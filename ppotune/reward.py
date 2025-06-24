@@ -1,3 +1,5 @@
+import typing as tp
+
 from abc import ABC, abstractmethod
 from omegaconf import DictConfig
 from typing import Iterator, Tuple
@@ -274,3 +276,164 @@ class DeepSeekMathRewardModel(IRewardModel):
                 elem.text if elem.text is not None else "" for elem in root.findall("answer")
             ],
         }
+
+
+class MultiHopQAShapedReward(IRewardModel):
+    """
+    Our Rule-Based Reward Model for QA-Reasoning Format.
+    """
+    def __init__(self) -> None:
+        return
+
+    def setup(
+        self,
+        cfg: DictConfig,
+        tokenizer: ModelTokenizer,
+        **kwargs
+    ) -> None:
+        self.tokenizer = tokenizer
+
+    @tp.override
+    def named_parameters(
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ) -> Iterator[tuple[str, Parameter]]:
+        return iter([])
+
+
+    def __call__(
+        self,
+        tokens:             torch.Tensor, # B x (Q + R)
+        causal_mask:        torch.Tensor, # B x (Q + R) x (Q + R)
+        position_ids:       torch.Tensor, # B x (Q + R)
+        responses_pad_mask: torch.Tensor, # B x R
+        batch:              dict[str, torch.Tensor | str],
+        **kwargs
+    ) -> torch.Tensor: # B
+
+        batch_size = tokens.shape[0]
+        queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
+        response_tokens = tokens[:, queries_len:].clone()
+        response_tokens[responses_pad_mask] = self.tokenizer.pad_id
+
+        scores = torch.zeros_like(tokens[:,0], dtype=torch.float32)
+        successes = torch.zeros_like(tokens[:,0], dtype=torch.float32)
+
+        for i in range(batch_size):
+            response = self.tokenizer.decode(response_tokens[i].tolist())
+            answers = batch["answers"][i]
+            final_answer = batch["final_answer"][i]
+            scores[i], successes[i] = self.shaped_correctness_reward(
+                answers=answers, final_answer=final_answer, completion=response
+            )
+
+        logger.collect_dict({
+            "success_rate": successes,
+            "scores": scores
+        })
+        return scores
+
+
+    @staticmethod
+    def shaped_correctness_reward(answers: list[str], final_answer: str, completion: str) -> tuple[float, float]:
+        """
+        Computes a shaped reward based on intermediate reasoning and final answer.
+
+        Args:
+            answers (List[str]): Expected intermediate answers (in order).
+            final_answer (str): Expected final answer.
+            completion (str): Model's output in structured format.
+
+        Returns:
+            Tuple[float, float]: (shaped reward, binary success)
+        """
+        reward = 0.0
+        success = 0.0
+
+        try:
+            tags = MultiHopQAShapedReward.extract_tags(completion)
+        except ElementTree.ParseError:
+            return 0.0, 0.0
+
+        if len(tags["answer"]) == 1:
+            reward += 5.0
+
+        if len(tags["think"]) == 1:
+            reward += 5.0
+
+        intermediates = [
+            step.get("answer", "").strip()
+            for step in tags["think"][0]
+        ] if tags["think"] else []
+
+        if len(intermediates) == len(answers):
+            reward += 5.0
+
+        for i, expected in enumerate(answers):
+            if i >= len(intermediates):
+                break
+            pred = intermediates[i]
+            if pred in expected:
+                reward += 10.0
+
+        if any(attempt == final_answer for attempt in tags["answer"]):
+            # One of the answer tags has the right answer
+            reward += 20.0
+
+        if any((final_answer in attempt) for attempt in tags["answer"]):
+            # One of the answer tags contains the right answer (might be e.g. $20 instead of 20)
+            reward += 10.0
+
+        if len(tags["answer"]) > 0 and tags["answer"][-1] == final_answer:
+            reward = 100.0
+            success = 1
+
+        return reward, success
+
+
+    @staticmethod
+    def extract_tags(text: str) -> dict[str, tp.Any]:
+        """
+        Expects intermediate <question>/<answer> reasoning format like:
+
+        <think>
+        <question>1st question</question>
+        <answer>1st answer</answer>
+        <question>2nd question</question>
+        <answer>2nd answer</answer>
+        </think>
+        <answer>final answer</answer>
+
+        and parses it into dictionary form:
+        {
+            "think": List[List[Dict[str, str]]],  # List of <think> blocks, each with q-a steps
+            "answer": List[str],                  # All top-level <answer> contents
+        }
+        """
+        result = {
+            "think": [],
+            "answer": [],
+        }
+
+        xml_string = f"<root>{text}</root>"
+
+        root = ElementTree.fromstring(xml_string)
+
+        for think_elem in root.findall("think"):
+            steps = []
+            children = list(think_elem)
+            i = 0
+            while i + 1 < len(children):
+                if children[i].tag == "question" and children[i + 1].tag == "answer":
+                    steps.append({
+                        "question": (children[i].text or "").strip(),
+                        "answer": (children[i + 1].text or "").strip(),
+                    })
+                    i += 2
+                else:
+                    i += 1  # Skip malformed or unexpected tags
+            result["think"].append(steps)
+
+        for answer_elem in root.findall("answer"):
+            result["answer"].append((answer_elem.text or "").strip())
+
+        return result
