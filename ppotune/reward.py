@@ -375,15 +375,11 @@ class MultiHopQAShapedReward(IRewardModel):
             if pred in expected:
                 reward += 10.0
 
-        if any(attempt == final_answer for attempt in tags["answer"]):
+        if any(attempt in final_answer for attempt in tags["answer"]):
             # One of the answer tags has the right answer
             reward += 20.0
 
-        if any((final_answer in attempt) for attempt in tags["answer"]):
-            # One of the answer tags contains the right answer (might be e.g. $20 instead of 20)
-            reward += 10.0
-
-        if len(tags["answer"]) > 0 and tags["answer"][-1] == final_answer:
+        if len(tags["answer"]) > 0 and tags["answer"][-1] in final_answer:
             reward = 100.0
             success = 1
 

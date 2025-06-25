@@ -23,17 +23,21 @@ class Evaluator(tp.Protocol):
         tokenizer: ModelTokenizer,
         seed: int = 0
     ) -> None:
-        ...
+        pass
 
     def __call__(
         self,
         model: GenerativeModel,
-        step: int
+        step: int = 0
     ) -> None:
         """
         Performs evaluation at each n-th step and logs the result.
         """
-        ...
+        pass
+
+
+class EmptyEvaluator(Evaluator):
+    ...
 
 
 class EvaluationGroup(Evaluator):
@@ -147,6 +151,11 @@ class ReferenceCompletionEvaluator(Evaluator):
 def evaluation_group(evaluators: tp.List[Evaluator]) -> EvaluationGroup:
     return EvaluationGroup(evaluators)
 
+
+def empty_evaluator() -> Evaluator:
+    return EmptyEvaluator()
+
+
 def reference_completion_evaluator(
         arbiter: PairwiseArbiter,
         every_n_steps: int,
@@ -166,3 +175,4 @@ def reference_completion_evaluator(
         num_logs=num_logs,
         empty_cache_after_generation=empty_cache_after_generation,
     )
+

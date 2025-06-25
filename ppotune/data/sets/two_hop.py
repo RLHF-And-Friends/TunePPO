@@ -35,7 +35,7 @@ class TwoHopTransform(MultihopTransform):
 
 two_hop_dataset = partial(
     MultiHopDataset,
-    sample_transform=TwoHopTransform,
+    sample_transform=TwoHopTransform(),
     system_prompt=TWO_HOP_SYSTEM_PROMPT,
 )
 

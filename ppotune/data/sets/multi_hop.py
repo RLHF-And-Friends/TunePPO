@@ -10,7 +10,7 @@ from torchtune.modules.transforms import Transform
 class MultiHopProblem(tp.TypedDict):
     question: str
     answers: tp.List[str]
-    final_answer: str
+    final_answer: tp.List[str]
  
 
 class MultihopTransform(Transform):
