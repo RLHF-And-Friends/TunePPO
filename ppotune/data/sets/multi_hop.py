@@ -10,6 +10,7 @@ from torchtune.modules.transforms import Transform
 class MultiHopProblem(tp.TypedDict):
     question: str
     answers: tp.List[str]
+    final_answer: str
  
 
 class MultihopTransform(Transform):
@@ -69,7 +70,8 @@ class MultiHopDataset(Dataset):
         tokens = self._tokenize_question(sample["question"])
         return {
             "tokens": tokens,
-            "answers": sample["answers"]
+            "answers": sample["answers"],
+            "final_answer": sample["final_answer"]
         }
 
     def __len__(self) -> int:
