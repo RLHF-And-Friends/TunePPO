@@ -319,7 +319,10 @@ class MultiHopQAShapedReward(IRewardModel):
         successes = torch.zeros_like(tokens[:,0], dtype=torch.float32)
 
         for i in range(batch_size):
-            response = self.tokenizer.decode(response_tokens[i].tolist())
+            response = self.tokenizer.decode(
+                response_tokens[i].tolist(),
+                skip_special_tokens=True
+            )
             answers = batch["answers"][i]
             final_answer = batch["final_answer"][i]
             scores[i], successes[i] = self.shaped_correctness_reward(
@@ -411,7 +414,6 @@ class MultiHopQAShapedReward(IRewardModel):
         }
 
         xml_string = f"<root>{text}</root>"
-
         root = ElementTree.fromstring(xml_string)
 
         for think_elem in root.findall("think"):

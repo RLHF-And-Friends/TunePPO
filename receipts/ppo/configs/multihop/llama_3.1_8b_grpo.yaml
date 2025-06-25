@@ -28,9 +28,9 @@
 prefix: ~/.tune
 
 project: MULTIHOP
-group: Llama3.1-8B-Instruct-PPO
+group: Llama3.1-8B-Instruct-GRPO
 model: Llama-3.1-8B-Instruct
-run: PPO
+run: GRPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
