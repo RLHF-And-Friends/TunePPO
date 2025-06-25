@@ -1,10 +1,27 @@
 import typing as tp
+from functools import partial
 
 from datasets import load_dataset
 from torch.utils.data import Dataset
 from torchtune.data import Message
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.transforms import Transform
+
+MULTI_HOP_SYSTEM_PROMPT = """You are a chain-of-thought language model. When the user asks a question you MUST reply in the structure below:
+<think>
+<question> <first self-generated sub-question> </question> <answer> <answer to the first sub-question> </answer>
+<question> <second self-generated sub-question> </question> <answer> <answer to the second sub-question> </answer>
+...
+</think>
+<answer> <final answer to the user’s original question> </answer>
+
+Rules
+1. Ask yourself sub-questions and answer them, wrap questions and answers in the indicated tags.
+2. All inner tags (<question> / <answer>) live **inside** a single <think> ... </think> block.
+3. After the </think> tag, output one—and only one—final answer to the user question, wrapped in its own outer <answer> ... </answer> tag.
+4. Do not reveal any additional text, commentary, or tags outside those shown above.
+5. Preserve the tag names and their order precisely as specified.
+"""
 
 
 class MultiHopProblem(tp.TypedDict):
@@ -76,4 +93,39 @@ class MultiHopDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self._data)
+
+
+class TwoHopTransform(MultihopTransform):
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
+        question = sample["generated_question"]
+        answers = []
+        answers.append(sample["second_entity_aliases"])
+        answers.append(sample["third_entity_aliases"])
+        final_answer = sample["third_entity_aliases"]
+
+        return MultiHopProblem(question=question, answers=answers, final_answer=final_answer)
+
+
+class ThreeHopTransform(MultihopTransform):
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
+        question = sample["generated_question"]
+        answers = []
+        answers.append(sample["second_entity_aliases"])
+        answers.append(sample["third_entity_aliases"])
+        answers.append(sample["fourth_entity_aliases"])
+        final_answer = sample["fourth_entity_aliases"]
+
+        return MultiHopProblem(question=question, answers=answers, final_answer=final_answer)
+
+
+two_hop_dataset = partial(
+    MultiHopDataset,
+    sample_transform=TwoHopTransform(),
+    system_prompt=MULTI_HOP_SYSTEM_PROMPT,
+)
+three_hop_dataset = partial(
+    MultiHopDataset,
+    sample_transform=ThreeHopTransform(),
+    system_prompt=MULTI_HOP_SYSTEM_PROMPT,
+)
 

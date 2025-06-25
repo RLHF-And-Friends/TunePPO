@@ -1,4 +1,4 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model.
+# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.2-3B model for Multihop QA task.
 #
 # This config uses hyperparameters based on small set of experiments and information
 # available from existing implementations.
@@ -6,14 +6,14 @@
 # This config assumes that you've run the following commands before launching
 # this run: (take a look what prefix is down the config)
 # Download the policy model
-#   a. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Instruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ~/.tune/models/Llama-3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
+#   a. (Base) tune download meta-llama/Llama-3.2-3B --output-dir ~/.tune/models/Llama-3.2-3B-Base/ --ignore-patterns "original/consolidated.00.pth"
+#   b. (Instruct) tune download meta-llama/Llama-3.2-3B-Instruct --output-dir ~/.tune/models/Llama-3.2-3B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
 # value models as well as WandBLogger logs are saved in sub-folders.
 #
 # To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/gsm8k_llama_3.1_8b_ppo.yaml
+#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/multihop/two_hop/llama_3.2_3b_grpo.yaml
 #
 # To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
 # export OPENAI_API_KEY=<your API key>.
@@ -25,12 +25,10 @@
 
 prefix: ~/.tune
 
-project: GSM8K
-# group: Llama-3.1-8B-Instruct-GRPO
-# model: Llama-3.1-8B-Instruct
-group: Llama-3.1-8B-Base-GRPO
-model: Llama-3.1-8B-Base
-run: GRPO
+project: MULTIHOP
+group: Llama-3.2-3B-Instruct-PPO
+model: Llama-3.2-3B-Instruct
+run: PPO
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -52,37 +50,26 @@ empty_cache_after_generation: True
 # ---------------------------------- Data ----------------------------------- #
 
 tokenizer:
-  _component_: ppotune.tokenizers.llama3_tokenizer
-  # eos_token: <|eot_id|> # for chat model
-  eos_token: <|end_of_text|> # for base model
-  path: ${prefix}/models/${model}/original/tokenizer.model
+  _component_: ppotune.tokenizers.hf_tokenizer
+  path: ${prefix}/models/${model}/
+  pad_token: <|finetune_right_pad_id|>
   max_seq_len: 2500
 
 dataset:
-  # _component_: ppotune.datasets.chat_gsm8k_dataset
-  _component_: ppotune.datasets.plain_gsm8k_dataset
+  _component_: ppotune.data.sets.two_hop_dataset
+  source: VavGreg/wikidata_b21_dataset
+  name: bridge_21
   split: train
 
 dataloader:
   _component_: ppotune.data.loaders.distributed_dataloader
   batch_size: 64
-  group_size: 8 # note that the data volume is effectively /= group_size
+  group_size: 8
   num_steps: 156
   num_epochs: 1
 
-evaluation_dataset:
-  _component_: ppotune.datasets.eval_gsm8k_dataset
-
-# Evaluator
 evaluator:
-  _component_: ppotune.evaluation.gsm8k_evaluator
-  arbiter:
-    _component_: ppotune.arbiters.gsm8k_arbiter
-    base_url: https://api.deepinfra.com/v1/openai
-    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
-  num_samples: 128 # better be divisible by forward_batch_size
-  every_n_steps: 13
-  seed: 0xD1CE
+  _component_: ppotune.evaluation.empty_evaluator
 
 # PPO Optimization Batch Parameters
 ppo_epochs: 2
@@ -93,14 +80,15 @@ forward_batch_size: 8
 
 # --------------------------------- Policy ---------------------------------- #
 #
+
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
-  max_response_len: 250
+  max_response_len: 256
   temperature: 0.7
   top_k: null
   model:
-    _component_: torchtune.models.llama3_1.lora_llama3_1_8b
+    _component_: torchtune.models.llama3_2.lora_llama3_2_3b
     # (Q)LoRA
     lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
     apply_lora_to_mlp: True
@@ -114,10 +102,8 @@ policy:
     checkpoint_dir: ${prefix}/models/${model}/
     checkpoint_files:
       [
-        "model-00001-of-00004.safetensors",
-        "model-00002-of-00004.safetensors",
-        "model-00003-of-00004.safetensors",
-        "model-00004-of-00004.safetensors"
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
       ]
     # this is the only place where you should update `recipe_checkpoint` if resuming training
     recipe_checkpoint: null
@@ -130,14 +116,14 @@ advantage:
   _component_: ppotune.advantage.GRAE
   group_size: ${dataloader.group_size}
   reward:
-    _component_: ppotune.reward.DeepSeekMathRewardModel
+    _component_: ppotune.reward.MultiHopQAShapedReward
 
 
 # ---------------------------- Reference Model ------------------------------ #
 #
 reference:
   _component_: ppotune.comm.distributed_policy_mixture
-  update_every_n_steps: 13
+  update_every_n_steps: 1000
   protocol:
     _component_: ppotune.comm.static_protocol
     weightage:
