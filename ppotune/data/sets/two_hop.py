@@ -35,9 +35,7 @@ class TwoHopTransform(MultihopTransform):
 
 two_hop_dataset = partial(
     MultiHopDataset,
-    source="VavGreg/wikidata_b21_dataset",
     sample_transform=TwoHopTransform,
     system_prompt=TWO_HOP_SYSTEM_PROMPT,
-    name="bridge_21"
 )
 
