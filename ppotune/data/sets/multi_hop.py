@@ -7,6 +7,8 @@ from torchtune.data import Message
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.modules.transforms import Transform
 
+from ppotune.data.utils import PrefixSuffix, PromptTemplate, apply_prompt_template
+
 MULTI_HOP_SYSTEM_PROMPT = """You are a chain-of-thought language model. When the user asks a question you MUST reply in the structure below:
 <think>
 <question> <first self-generated sub-question> </question> <answer> <answer to the first sub-question> </answer>
@@ -17,11 +19,17 @@ MULTI_HOP_SYSTEM_PROMPT = """You are a chain-of-thought language model. When the
 
 Rules
 1. Ask yourself sub-questions and answer them, wrap questions and answers in the indicated tags.
-2. All inner tags (<question> / <answer>) live **inside** a single <think> ... </think> block.
+2. All inner tags (<question> / <answer>) live inside a single <think> ... </think> block.
 3. After the </think> tag, output one—and only one—final answer to the user question, wrapped in its own outer <answer> ... </answer> tag.
-4. Do not reveal any additional text, commentary, or tags outside those shown above.
-5. Preserve the tag names and their order precisely as specified.
+4. Inside answers tags give only answers to the questions without any additional text.
+5. Preserve the tag names and their order precisely as specified. 
 """
+
+MULTI_HOP_PROMPT_TEMPLATE: PromptTemplate = {
+    "system": PrefixSuffix("", " "),
+    "user": PrefixSuffix("User: ", " "),
+    "assistant": PrefixSuffix("Assistant: ", "")
+}
 
 
 class MultiHopProblem(tp.TypedDict):
@@ -42,11 +50,13 @@ class MultiHopDataset(Dataset):
         sample_transform: MultihopTransform,
         filter_fn: tp.Optional[tp.Callable] = None,
         system_prompt: tp.Optional[str] = None,
+        prompt_template: tp.Optional[str] = None,
         **load_dataset_kwargs,
     ) -> None:
         self._data = load_dataset(path=source, **load_dataset_kwargs)
         self._sample_transform = sample_transform
         self._system_prompt = system_prompt
+        self._prompt_template = prompt_template
 
         if filter_fn is not None:
             self.data = self.data.filter(filter_fn)
@@ -75,10 +85,20 @@ class MultiHopDataset(Dataset):
             )
         )
 
-        tokens = self._tokenizer.tokenize_messages(
-            messages=messages,
-            add_generation_prompt=True
-        )
+        tokens = []
+        if self._prompt_template is None:
+            tokens = self._tokenizer.tokenize_messages(
+                messages=messages,
+                add_generation_prompt=True
+            )
+        else:
+            text = apply_prompt_template(
+                template=self._prompt_template,
+                messages=messages,
+                add_generation_prompt=True
+            )
+            tokens = self._tokenizer.encode(text, add_eos=False)
+            tokens = tokens[:self._tokenizer.max_seq_len]
 
         return tokens
 
@@ -122,10 +142,12 @@ two_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=TwoHopTransform(),
     system_prompt=MULTI_HOP_SYSTEM_PROMPT,
+    prompt_tamplate=MULTI_HOP_PROMPT_TEMPLATE,
 )
 three_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=ThreeHopTransform(),
     system_prompt=MULTI_HOP_SYSTEM_PROMPT,
+    prompt_template=MULTI_HOP_PROMPT_TEMPLATE
 )
 

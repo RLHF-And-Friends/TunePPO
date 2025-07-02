@@ -102,7 +102,11 @@ evaluator:
         # top_p: 0.95
         # extra_body:
         #   chat_template_kwargs:
+<<<<<<< HEAD
         #     enable_thinking: True
+=======
+        #     enable_thinking: True
+>>>>>>> 8f37edb (base llama 8b added to three_hop)
         #   top_k: 20
         #   min_p: 0.0
         # -------------------------------------------------------------------------
@@ -133,7 +137,11 @@ evaluator:
         # top_p: 0.95
         # extra_body:
         #   chat_template_kwargs:
+<<<<<<< HEAD
         #     enable_thinking: True
+=======
+        #     enable_thinking: True
+>>>>>>> 8f37edb (base llama 8b added to three_hop)
         #   top_k: 20
         #   min_p: 0.0
         # -------------------------------------------------------------------------
