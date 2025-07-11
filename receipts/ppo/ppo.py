@@ -143,6 +143,17 @@ class PPORecipe(FTRecipeInterface):
         )
         self._setup_batch_sizes(cfg)
 
+        if 'similarity_dataset' in cfg:
+            similarity_dataset: Dataset = instantiate(cfg.similarity_dataset)
+            similarity_dataset.setup(self._tokenizer)
+            self.similarity_dataloader = instantiate(
+                cfg.similarity_dataloader,
+                tokenizer=self._tokenizer,
+                dataset=similarity_dataset,
+                seed=self.seed
+            )
+            self.similarity_iter = iter(self.similarity_dataloader)
+
         self.eval: Evaluator = instantiate(cfg.evaluator)
         self.eval.setup(
             tokenizer=self._tokenizer,
@@ -318,6 +329,35 @@ class PPORecipe(FTRecipeInterface):
         })
         return trajectory
 
+    @torch.no_grad()
+    def generate_policy_batch(self, batch: dict) -> list[torch.Tensor]:
+        """
+        Generates policy logprobs batch for similarity calculation with proper batching.
+        """
+        batch["tokens"] = batch["tokens"].to(self._device)
+        policy_batch = []
+        
+        # Use the same batching logic as generate_trajectory_batched
+        for batch_start in range(0, batch["tokens"].shape[0], self._forward_batch_size):
+            subbatch = {}
+            for key in batch.keys():
+                subbatch[key] = batch[key][
+                    batch_start : batch_start + self._forward_batch_size
+                ]
+            
+            generated = self.policy.generate(prompt=subbatch["tokens"])
+            query_len = subbatch["tokens"].shape[1]
+            logprobs = self.policy.logits_to_logprobs(generated.logits, generated.tokens[:, query_len:])
+            response_mask = generated.response_mask[:, query_len:]
+            
+            for b in range(logprobs.shape[0]):
+                length = response_mask[b].sum().item()
+                policy_batch.append(logprobs[b, :length])
+                
+            torch.cuda.empty_cache() if self._empty_cache else None
+        
+        return policy_batch
+
     def train(self) -> None:
         """
         The core training loop.
@@ -367,6 +407,15 @@ class PPORecipe(FTRecipeInterface):
             self.eval(self.policy, step)
 
             self._ref_policy.gather(trajectory)
+            if hasattr(self._ref_policy, 'set_policy_batch_for_similarity'):
+                try:
+                    test_batch = next(self.similarity_iter)
+                except StopIteration:
+                    self.similarity_iter = iter(self.similarity_dataloader)
+                    test_batch = next(self.similarity_iter)
+                policy_batch = self.generate_policy_batch(test_batch)
+                self._ref_policy.set_policy_batch_for_similarity(policy_batch)
+                torch.cuda.empty_cache()
             self._ref_policy.update_at(step)
 
             wandb_logger.flush(step=step)

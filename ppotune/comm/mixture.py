@@ -107,6 +107,9 @@ class DistributedMixture(ABC):
         """
         return self.forward(tokens, mask, input_pos)
 
+    def set_policy_batch_for_similarity(self, policy_batch):
+        self._protocol.set_policy_batch(policy_batch)
+
 
 class DistributedLoRAWeightMixture(DistributedMixture):
     """

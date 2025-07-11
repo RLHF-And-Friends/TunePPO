@@ -4,7 +4,8 @@ from ppotune.comm.mixture import (
 )
 from ppotune.comm.protocols import (
     static_protocol,
-    score_based_protocol
+    score_based_protocol,
+    batch_policy_similarity_protocol
 )
 from ppotune.comm.weightage import (
     uniform_weightage,
@@ -17,6 +18,7 @@ __all__ = [
     "distributed_weight_mixture",
     "static_protocol",
     "score_based_protocol",
+    "batch_policy_similarity_protocol",
     "uniform_weightage",
     "softmax_weightage",
     "softmax_refined_uniform_weightage"
