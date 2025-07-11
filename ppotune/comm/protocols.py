@@ -103,8 +103,9 @@ class ScoreBasedProtocol(CommProtocol):
 
 
 class BatchPolicySimilarityProtocol:
-    def __init__(self, temperature=1.0):
+    def __init__(self, temperature=1.0, self_preference=None):
         self.temperature = temperature
+        self.self_preference = self_preference
         self._policy_batch = None
         self._weights = torch.ones(dist.get_world_size()) / dist.get_world_size()
 
@@ -120,8 +121,11 @@ class BatchPolicySimilarityProtocol:
         peer_policies = [None] * dist.get_world_size()
         dist.all_gather_object(peer_policies, self._policy_batch)
         my_rank = dist.get_rank()
-        similarities = torch.zeros(dist.get_world_size(), dtype=torch.float32, device='cuda')
-        for peer in range(dist.get_world_size()):
+        world_size = dist.get_world_size()
+        
+        # Compute similarities with all agents (including self)
+        similarities = torch.zeros(world_size, dtype=torch.float32, device='cuda')
+        for peer in range(world_size):
             sim = 0.0
             for k in range(len(self._policy_batch)):
                 a = peer_policies[my_rank][k].to('cuda')
@@ -130,8 +134,27 @@ class BatchPolicySimilarityProtocol:
                 dot = torch.dot(a[:min_len], b[:min_len]).item()
                 sim += dot
             similarities[peer] = sim / len(self._policy_batch)
-        # Removed artificial self_preference - use natural similarity only
-        self._weights = torch.softmax(similarities / self.temperature, dim=0)
+        
+        if self.self_preference is not None and world_size > 1:
+            # Set fixed self preference
+            self._weights = torch.zeros(world_size, dtype=torch.float32, device='cuda')
+            self._weights[my_rank] = self.self_preference
+            
+            # Distribute remaining mass among other agents based on similarity
+            remaining_mass = 1.0 - self.self_preference
+            other_similarities = similarities.clone()
+            other_similarities[my_rank] = 0.0  # exclude self from softmax
+            
+            # Apply softmax to other agents' similarities
+            other_weights = torch.softmax(other_similarities / self.temperature, dim=0)
+            other_weights[my_rank] = 0.0  # ensure self weight is 0 in other_weights
+            
+            # Scale other weights by remaining mass
+            self._weights += remaining_mass * other_weights
+        else:
+            # Original behavior: pure similarity-based softmax
+            self._weights = torch.softmax(similarities / self.temperature, dim=0)
+            
         self._policy_batch = None  # clear
 
     def __call__(self, tensors):
@@ -152,5 +175,5 @@ def static_protocol(weightage: Weightage) -> StaticProtocol:
 def score_based_protocol(weightage: Weightage) -> ScoreBasedProtocol:
     return ScoreBasedProtocol(weightage)
 
-def batch_policy_similarity_protocol(temperature=1.0) -> BatchPolicySimilarityProtocol:
-    return BatchPolicySimilarityProtocol(temperature)
+def batch_policy_similarity_protocol(temperature=1.0, self_preference=None) -> BatchPolicySimilarityProtocol:
+    return BatchPolicySimilarityProtocol(temperature, self_preference)

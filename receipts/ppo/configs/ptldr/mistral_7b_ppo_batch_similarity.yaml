@@ -238,6 +238,7 @@ reference:
   protocol:
     _component_: ppotune.comm.batch_policy_similarity_protocol
     temperature: 1.0
+    self_preference: 0.2
 
 
 # --------------------------------- Other ----------------------------------- #
