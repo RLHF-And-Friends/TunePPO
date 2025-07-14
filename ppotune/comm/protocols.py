@@ -107,7 +107,21 @@ class BatchPolicySimilarityProtocol:
         self.temperature = temperature
         self.self_preference = self_preference
         self._policy_batch = None
-        self._weights = torch.ones(dist.get_world_size()) / dist.get_world_size()
+        
+        # Initialize weights with self_preference if provided
+        world_size = dist.get_world_size()
+        if self.self_preference is not None and world_size > 1:
+            self._weights = torch.zeros(world_size, dtype=torch.float32)
+            self._weights[dist.get_rank()] = self.self_preference
+            # Distribute remaining mass uniformly
+            remaining_mass = 1.0 - self.self_preference
+            other_weights = remaining_mass / (world_size - 1)
+            for i in range(world_size):
+                if i != dist.get_rank():
+                    self._weights[i] = other_weights
+        else:
+            # Default: uniform weights
+            self._weights = torch.ones(world_size) / world_size
 
     def set_policy_batch(self, policy_batch):
         self._policy_batch = policy_batch
