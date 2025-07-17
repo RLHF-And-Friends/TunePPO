@@ -9,6 +9,10 @@ from torchtune.modules.transforms import Transform
 
 from ppotune.data.utils import PrefixSuffix, PromptTemplate, apply_prompt_template
 
+# -------------------------------------------------------------------------------------------------
+# System prompt with specific question-answer format
+# -------------------------------------------------------------------------------------------------
+
 MULTI_HOP_SYSTEM_PROMPT = """You are a chain-of-thought language model. When the user asks a question you MUST reply in the structure below:
 <think>
 <question> <first self-generated sub-question> </question> <answer> <answer to the first sub-question> </answer>
@@ -25,11 +29,30 @@ Rules
 5. Preserve the tag names and their order precisely as specified. 
 """
 
-MULTI_HOP_PROMPT_TEMPLATE: PromptTemplate = {
+# -------------------------------------------------------------------------------------------------
+# System prompt with general resoning
+# -------------------------------------------------------------------------------------------------
+
+BASIC_REASONING_SYSTEM_PROMPT = (
+    "A conversation between User and Assistant. The user asks a question, and "
+    "the Assistant solves it. The assistant first thinks about the reasoning "
+    "process in the mind and then provides the user with the answer. The "
+    "reasoning process and answer are enclosed within <think></think> and "
+    "<answer></answer> tags, respectively, i.e., <think>reasoning process "
+    "here</think> <answer>answer here</answer>."
+)
+
+# -------------------------------------------------------------------------------------------------
+# Prompt tamplate for non-chat models
+# -------------------------------------------------------------------------------------------------
+
+BASIC_PROMPT_TEMPLATE: PromptTemplate = {
     "system": PrefixSuffix("", " "),
     "user": PrefixSuffix("User: ", " "),
     "assistant": PrefixSuffix("Assistant: ", "")
 }
+
+# -------------------------------------------------------------------------------------------------
 
 
 class MultiHopProblem(tp.TypedDict):
@@ -141,13 +164,13 @@ class ThreeHopTransform(MultihopTransform):
 two_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=TwoHopTransform(),
-    system_prompt=MULTI_HOP_SYSTEM_PROMPT,
-    prompt_tamplate=MULTI_HOP_PROMPT_TEMPLATE,
+    system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    prompt_tamplate=BASIC_PROMPT_TEMPLATE,
 )
 three_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=ThreeHopTransform(),
-    system_prompt=MULTI_HOP_SYSTEM_PROMPT,
-    prompt_template=MULTI_HOP_PROMPT_TEMPLATE
+    system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    prompt_template=BASIC_PROMPT_TEMPLATE
 )
 

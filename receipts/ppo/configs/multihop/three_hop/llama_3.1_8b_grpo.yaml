@@ -117,7 +117,9 @@ advantage:
   _component_: ppotune.advantage.GRAE
   group_size: ${dataloader.group_size}
   reward:
-    _component_: ppotune.reward.MultiHopQAShapedReward
+    _component_: ppotune.reward.LLMBasedMultiHopQAShapedReward
+    base_url: https://api.deepinfra.com/v1/openai
+    model: Qwen/Qwen3-32B
 
 
 # ---------------------------- Reference Model ------------------------------ #

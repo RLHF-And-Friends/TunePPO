@@ -1,14 +1,18 @@
 import typing as tp
 
+from concurrent.futures import ThreadPoolExecutor
+from openai import OpenAI
+import ast
+import re
+
 from abc import ABC, abstractmethod
 from omegaconf import DictConfig
-from typing import Iterator, Tuple
+from typing import Iterator, Tuple, override
 
 from torchtune.modules.peft import disable_adapter
 from torchtune.modules.tokenizers import ModelTokenizer
 from torchtune.training import get_unmasked_sequence_lengths
 from torchtune.rlhf import get_reward_penalty_mask, get_rewards_ppo
-
 
 from ppotune.log import WandbLogger
 from ppotune.model import LoRAModel
@@ -435,3 +439,230 @@ class MultiHopQAShapedReward(IRewardModel):
             result["answer"].append((answer_elem.text or "").strip())
 
         return result
+
+
+# -------------------------------------------------------------------------------------------------
+# Reward using LLM to reasoning assessment
+# -------------------------------------------------------------------------------------------------
+
+TRIPLET_EXTRACTOR_PROMPT = """Analyze the following text step-by-step. For each logical statement in the text, perform the following actions:
+1.  Identify the main subject of the statement.
+2.  Identify the new piece of information (the answer) that the text provides about the subject.
+3.  Formulate a question that links this subject and answer.
+4.  Assemble the result into a triplet `(subject, question, answer)`.
+
+After analyzing all statements, present the final result as a list of triplets. You need to provide your answer in the format of a list of triplets. Do not include any other text in your answer.
+
+### Example for Analysis
+
+**Source text:**
+Donatus Djagom was a Roman Catholic bishop, and the headquarters of the Roman Catholic Church (the Holy See) is in Vatican City, an independent city-state enclaved within Rome, Italy.
+
+**Reasoning:**
+1.  First statement: "Donatus Djagom was a Roman Catholic bishop".
+    *   Subject: "Donatus Djagom"
+    *   Answer: "Catholicism"
+    *   Question: "What is the religious affiliation of Donatus Djagom?"
+    *   Triplet: ("Donatus Djagom", "What is the religious affiliation of Donatus Djagom?", "Catholicism")
+2.  Second statement: "the headquarters of the Roman Catholic Church (the Holy See) is in Vatican City".
+    *   Subject: "Catholicism"
+    *   Answer: "Vatican City"
+    *   Question: "Where is the headquarters of the Catholic Church located?"
+    *   Triplet: ("Catholicism", "Where is the headquarters of the Catholic Church located?", "Vatican City")
+
+**Final result as a list:**
+[("Donatus Djagom", "What is the religious affiliation of Donatus Djagom?", "Catholicism"), ("Catholicism", "Where is the headquarters of the Catholic Church located?", "Vatican City")]
+
+### Your Task
+
+**Source text:**
+{text}
+
+**Final result as a list:**
+
+You need to provide your answer in the format of a list of triplets. Do not include any other text in your answer.
+"""
+
+class LLMBasedMultiHopQAShapedReward(IRewardModel):
+    def __init__(self, base_url: str, model: str, **api_request_kwargs) -> None:
+        self._llm_api = OpenAI(base_url=base_url)
+        self._model = model
+        self._api_request_kwargs = api_request_kwargs
+
+    def named_parameters(
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ) -> Iterator[tuple[str, Parameter]]:
+        return iter([])
+
+    @override
+    def setup(self, cfg: DictConfig, tokenizer: ModelTokenizer, **kwargs) -> None:
+        self._tokenizer = tokenizer
+
+    def __call__(
+        self,
+        tokens:             torch.Tensor, # B x (Q + R)
+        causal_mask:        torch.Tensor, # B x (Q + R) x (Q + R)
+        position_ids:       torch.Tensor, # B x (Q + R)
+        responses_pad_mask: torch.Tensor, # B x R
+        batch:              dict[str, torch.Tensor | str],
+        **kwargs
+    ) -> torch.Tensor: # B
+
+        queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
+        response_tokens = tokens[:, queries_len:].clone()
+        response_tokens[responses_pad_mask] = self._tokenizer.pad_id
+
+        responses = [
+            self._tokenizer.decode(single_response_tokens.tolist(), skip_special_tokens=True) for
+            single_response_tokens in response_tokens
+        ]
+        answers = batch["answers"]
+        final_answers = batch["final_answer"]
+
+        with ThreadPoolExecutor() as executor:
+            scores, successes, reasonings, extractor_responses, interm_answers = zip(
+                *executor.map(self.shaped_correctness_reward, answers, final_answers, responses)
+            )
+
+        logger.collect_table(
+            name="LLM extractor",
+            columns={
+                "reasoning": reasonings,
+                "LLM response": extractor_responses,
+                "intermediates": [", ".join(answers) for answers in interm_answers],
+            }
+        )
+
+        successes = torch.tensor(
+            successes,
+            dtype = torch.float32,
+            device=tokens.device,
+        ).unsqueeze(1)
+        scores = torch.tensor(
+            scores,
+            dtype = torch.float32,
+            device=tokens.device,
+        ).unsqueeze(1)
+
+        logger.collect_dict({
+            "success_rate": successes,
+            "scores": scores,
+        })
+
+        return scores
+
+    def shaped_correctness_reward(
+        self,
+        answers: list[str],
+        final_answer: str,
+        completion: str
+    ) -> tuple[float, float, str, str, list]:
+        """
+        Computes a shaped reward based on intermediate reasoning and final answer.
+
+        Args:
+            answers (List[str]): Expected intermediate answers (in order).
+            final_answer (str): Expected final answer.
+            completion (str): Model's output in structured format.
+
+        Returns:
+            Tuple[float, float, str, str, list]: (
+                shaped reward,
+                binary success,
+                reasoning text,
+                llm_extractor_response,
+                list of intermediate answers
+            )
+        """
+        reward = 0.0
+        success = 0.0
+
+        try:
+            tags = self.extract_tags(completion)
+        except ElementTree.ParseError:
+            return 0.0, 0.0, "", "", []
+
+        if len(tags["answer"]) == 1:
+            reward += 5.0
+
+        if len(tags["think"]) == 1:
+            reward += 5.0
+
+        if len(tags["think"]) > 0:
+            reasoning = tags["think"][0]
+
+            # print(f"Reasoning: {reasoning}")
+
+            llm_response, intermediates = self.extract_answers_from_reasoning(reasoning)
+        else:
+            reasoning, llm_response, intermediates = "", "", []
+
+        if len(intermediates) == len(answers):
+            reward += 5.0
+
+        for i, expected in enumerate(answers):
+            if i >= len(intermediates):
+                break
+            pred = intermediates[i]
+            if pred in expected:
+                reward += 10.0
+
+        if any(attempt in final_answer for attempt in tags["answer"]):
+            # One of the answer tags has the right answer
+            reward += 20.0
+
+        if len(tags["answer"]) > 0 and tags["answer"][-1] in final_answer:
+            reward = 100.0
+            success = 1
+
+        return reward, success, reasoning, llm_response, intermediates
+
+    @staticmethod
+    def extract_tags(text: str) -> dict[str, list[str]]:
+        """
+        Parse XML-like tags from text. Returns a dictionary with keys 'think' and 'answer'.
+        The values are lists of strings, with each string being the content of a tag.
+        """
+        xml_string = f"<root>{text}</root>"
+        root = ElementTree.fromstring(xml_string)
+        return {
+            "think": [
+                elem.text if elem.text is not None else "" for elem in root.findall("think")
+            ],
+            "answer": [
+                elem.text if elem.text is not None else "" for elem in root.findall("answer")
+            ],
+        }
+
+    def extract_answers_from_reasoning(self, reasoning: str) -> tuple[str, list[str]]:
+        """
+        Ask LLM to extract intermediate answers from model thinking.
+        """
+        prompt = TRIPLET_EXTRACTOR_PROMPT.format(text=reasoning)
+        messages = [{"role": "user", "content": prompt}]
+        completion = self._llm_api.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            **self._api_request_kwargs,
+        )
+        completion_text = completion.choices[0].message.content 
+
+        completion_without_reasoning = self.remove_reasoning(completion_text)
+        # print(f"Completion without reasoning: {completion_without_reasoning}")
+
+        try:
+            triplets = ast.literal_eval(completion_without_reasoning)
+        except (SyntaxError, ValueError):
+            return completion_text, []
+
+        answers = [answer for _, _, answer in triplets]
+        if not isinstance(answers, list) or not all(isinstance(answer, str) for answer in answers):
+            answers = []
+        # print(f"Answers: {answers}")
+
+        return completion_text, answers
+
+    @staticmethod
+    def remove_reasoning(text: str) -> str:
+        return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
