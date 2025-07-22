@@ -22,6 +22,8 @@ dependencies = [
 	# evaluation
 	"openai",
 	"vllm==0.8.5.post1",
+    # other
+    "smart-thinking-llm==0.1.0"
 ]
 
 # --------------------------- Build Specification --------------------------- #
@@ -42,3 +44,6 @@ select = [
 	"E", "W", # pycodestyle rule set
 	"F", # pyflakes rule set
 ]
+
+[tool.pyright]
+exclude = ["ppotune"]

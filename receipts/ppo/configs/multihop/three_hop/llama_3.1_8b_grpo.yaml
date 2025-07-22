@@ -117,10 +117,13 @@ advantage:
   _component_: ppotune.advantage.GRAE
   group_size: ${dataloader.group_size}
   reward:
-    _component_: ppotune.reward.LLMBasedMultiHopQAShapedReward
-    base_url: https://api.deepinfra.com/v1/openai
-    model: Qwen/Qwen3-32B
-
+    _component_: ppotune.reward.GraphMultihopQAReward
+    entity_aliases_filepath: ~/dev/rlhf/KG/wikidata5m_entity.txt
+    relation_aliases_filepath: ~/dev/rlhf/KG/wikidata5m_relation.txt
+    dataset_filepath: ~/dev/rlhf/KG/wikidata5m_transductive_train.txt
+    triplets_prompt_filepath: ~/dev/rlhf/KG/generate_triplets_prompt.txt
+    triplets_model: gpt-4.1-mini-2025-04-14
+    norm_lev_threshold: 0.8
 
 # ---------------------------- Reference Model ------------------------------ #
 #

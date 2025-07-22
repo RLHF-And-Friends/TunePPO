@@ -1,13 +1,15 @@
 import typing as tp
 
+from abc import ABC, abstractmethod
+from omegaconf import DictConfig
+from typing import Iterator, Tuple
+
 from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 import ast
 import re
-
-from abc import ABC, abstractmethod
-from omegaconf import DictConfig
-from typing import Iterator, Tuple, override
+from pathlib import Path, PurePath
+from functools import partial
 
 from torchtune.modules.peft import disable_adapter
 from torchtune.modules.tokenizers import ModelTokenizer
@@ -18,6 +20,8 @@ from ppotune.log import WandbLogger
 from ppotune.model import LoRAModel
 from ppotune.utils import append_mask
 from ppotune.volatile import VolatileFloat
+
+from smart_thinking_llm.tools.graph_creation import GraphCreator
 
 import torch
 from torch.nn import Parameter
@@ -297,7 +301,6 @@ class MultiHopQAShapedReward(IRewardModel):
     ) -> None:
         self.tokenizer = tokenizer
 
-    @tp.override
     def named_parameters(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
     ) -> Iterator[tuple[str, Parameter]]:
@@ -494,7 +497,6 @@ class LLMBasedMultiHopQAShapedReward(IRewardModel):
     ) -> Iterator[tuple[str, Parameter]]:
         return iter([])
 
-    @override
     def setup(self, cfg: DictConfig, tokenizer: ModelTokenizer, **kwargs) -> None:
         self._tokenizer = tokenizer
 
@@ -666,3 +668,158 @@ class LLMBasedMultiHopQAShapedReward(IRewardModel):
     def remove_reasoning(text: str) -> str:
         return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
+
+class GraphMultihopQAReward(IRewardModel):
+    def __init__(
+        self,
+        entity_aliases_filepath: str,
+        relation_aliases_filepath: str,
+        dataset_filepath: str,
+        triplets_prompt_filepath: str,
+        triplets_model: str,
+        norm_lev_threshold: float
+    ) -> None:
+        self.entity_aliases_filepath: PurePath = Path(entity_aliases_filepath)
+        self.relation_aliases_filepath: PurePath = Path(relation_aliases_filepath)
+        self.dataset_filepath: PurePath = Path(dataset_filepath)
+        self.triplets_prompt_filepath: PurePath = Path(triplets_prompt_filepath)
+        self.triplets_model: str = triplets_model
+        self.norm_lev_threshold: float = norm_lev_threshold
+
+    def named_parameters(
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ) -> Iterator[tuple[str, Parameter]]:
+        return iter([])
+
+    def setup(self, cfg: DictConfig, tokenizer: ModelTokenizer, **kwargs) -> None:
+        self._tokenizer = tokenizer
+
+    def __call__(
+        self,
+        tokens:             torch.Tensor, # B x (Q + R)
+        causal_mask:        torch.Tensor, # B x (Q + R) x (Q + R)
+        position_ids:       torch.Tensor, # B x (Q + R)
+        responses_pad_mask: torch.Tensor, # B x R
+        batch:              dict[str, torch.Tensor | str],
+        **kwargs
+    ) -> torch.Tensor: # B
+
+        queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
+        response_tokens = tokens[:, queries_len:].clone()
+        response_tokens[responses_pad_mask] = self._tokenizer.pad_id
+
+        responses = [
+            self._tokenizer.decode(single_response_tokens.tolist(), skip_special_tokens=True) for
+            single_response_tokens in response_tokens
+        ]
+        final_answers = batch["final_answer"]
+        paths = batch["path"]
+
+        graph_creator = graph_creator = GraphCreator(
+            entity_aliases_filepath=self.entity_aliases_filepath,
+            relation_aliases_filepath=self.relation_aliases_filepath,
+            dataset_filepath=self.dataset_filepath,
+            triplets_prompt_filepath=self.triplets_prompt_filepath,
+            openai_client=OpenAI(),
+            triplets_model="gpt-4.1-mini-2025-04-14",
+            norm_lev_threshold=0.8,
+        )
+
+        with ThreadPoolExecutor() as executor:
+            scores, successes = zip(
+                *executor.map(
+                    partial(self.shaped_correctness_reward, graph_creator),
+                    final_answers,
+                    paths,
+                    responses
+                )
+            )
+
+        successes = torch.tensor(
+            successes,
+            dtype = torch.float32,
+            device=tokens.device,
+        ).unsqueeze(1)
+        scores = torch.tensor(
+            scores,
+            dtype = torch.float32,
+            device=tokens.device,
+        ).unsqueeze(1)
+
+        logger.collect_dict({
+            "success_rate": successes,
+            "scores": scores,
+        })
+
+        return scores
+
+    def shaped_correctness_reward(
+        self,
+        graph_creator,
+        final_answer: str,
+        ground_truth_path: str,
+        completion: str
+    ) -> tuple[float, float]:
+        """
+        Computes a shaped reward based on intermediate reasoning and final answer.
+
+        Args:
+            answers (List[str]): Expected intermediate answers (in order).
+            final_answer (str): Expected final answer.
+            ground_truth_path (str): Expected grapth path.
+            completion (str): Model's output in structured format.
+
+        Returns:
+            Tuple[float, float]: (
+                shaped reward,
+                binary success,
+            )
+        """
+        reward = 0.0
+        success = 0.0
+
+        try:
+            tags = self.extract_tags(completion)
+        except ElementTree.ParseError:
+            return reward, success
+
+        if len(tags["think"]) > 0:
+            reasoning = tags["think"][0] 
+        else:
+            reasoning = ""
+
+        if len(tags["answer"]) == 1:
+            reward += 5.0
+
+        if len(tags["think"]) == 1:
+            reward += 5.0
+
+        ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
+        graph = graph_creator(reasoning)
+
+        similarity = graph.compare_to(ground_truth_graph)
+
+        reward += similarity * 50
+
+        if len(tags["answer"]) > 0 and tags["answer"][-1] in final_answer:
+            reward = 100.0
+            success = 1
+
+        return reward, success
+
+    @staticmethod
+    def extract_tags(text: str) -> dict[str, list[str]]:
+        """
+        Parse XML-like tags from text. Returns a dictionary with keys 'think' and 'answer'.
+        The values are lists of strings, with each string being the content of a tag.
+        """
+        xml_string = f"<root>{text}</root>"
+        root = ElementTree.fromstring(xml_string)
+        return {
+            "think": [
+                elem.text if elem.text is not None else "" for elem in root.findall("think")
+            ],
+            "answer": [
+                elem.text if elem.text is not None else "" for elem in root.findall("answer")
+            ],
+        }

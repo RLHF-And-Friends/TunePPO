@@ -58,6 +58,7 @@ BASIC_PROMPT_TEMPLATE: PromptTemplate = {
 class MultiHopProblem(tp.TypedDict):
     question: str
     answers: tp.List[str]
+    path: str
     final_answer: tp.List[str]
  
 
@@ -131,6 +132,7 @@ class MultiHopDataset(Dataset):
         return {
             "tokens": tokens,
             "answers": sample["answers"],
+            "path": sample["path"],
             "final_answer": sample["final_answer"]
         }
 
@@ -145,8 +147,14 @@ class TwoHopTransform(MultihopTransform):
         answers.append(sample["second_entity_aliases"])
         answers.append(sample["third_entity_aliases"])
         final_answer = sample["third_entity_aliases"]
+        path = sample["path"]
 
-        return MultiHopProblem(question=question, answers=answers, final_answer=final_answer)
+        return MultiHopProblem(
+            question=question,
+            answers=answers,
+            path=path,
+            final_answer=final_answer
+        )
 
 
 class ThreeHopTransform(MultihopTransform):
@@ -157,8 +165,14 @@ class ThreeHopTransform(MultihopTransform):
         answers.append(sample["third_entity_aliases"])
         answers.append(sample["fourth_entity_aliases"])
         final_answer = sample["fourth_entity_aliases"]
+        path = sample["path"]
 
-        return MultiHopProblem(question=question, answers=answers, final_answer=final_answer)
+        return MultiHopProblem(
+            question=question,
+            answers=answers,
+            path=path,
+            final_answer=final_answer
+        )
 
 
 two_hop_dataset = partial(
