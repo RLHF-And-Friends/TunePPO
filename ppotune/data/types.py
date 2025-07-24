@@ -35,6 +35,10 @@ class PPOTrajectoryStats(tp.NamedTuple):
             shape: [b, response_len]
         advantages (torch.Tensor): the estimated advantages with
             shape: [b, response_len]
+        scores (torch.Tensor): reward scores for the generated responses
+            shape: [b]
+        policy_batch (tp.Optional[tp.List[torch.Tensor]]): policy logprobs for similarity computation
+            list of tensors, each containing logprobs for correct answer tokens
     """
     # generated trajectory
     query_responses: torch.Tensor
@@ -53,3 +57,6 @@ class PPOTrajectoryStats(tp.NamedTuple):
     values: torch.Tensor
     returns: torch.Tensor
     scores: torch.Tensor
+    
+    # policy similarity data
+    policy_batch: tp.Optional[tp.List[torch.Tensor]] = None
