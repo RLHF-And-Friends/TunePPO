@@ -8,7 +8,7 @@
 # 1. Download a reward model
 #   a. (TLDR-SmallSFT-RM) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT-RM --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT-RM/
 # 2. Get Llama3.2-3B model
-#   a. (Base) tune download meta-llama/Llama-3.2-3B --output-dir ~/.tune/models/Llama-3.2-3B-Base/
+#   a. (Base) tune download meta-llama/Llama-3.2-3B --output-dir ~/.tune/models/Llama-3.2-3B-Base/ --ignore-patterns "original/consolidated.00.pth"
 #   b. (SmallSFT) tune download RLHF-And-Friends/TLDR-Llama-3.2-3B-SmallSFT --output-dir ~/.tune/models/Llama-3.2-3B-SmallSFT/
 #
 # You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and

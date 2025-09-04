@@ -70,6 +70,8 @@ class ReferenceCompletionEvaluator(Evaluator):
         every_n_steps: int,
         dataset: Dataset,
         dataloader_config: DataloaderConfig,
+        prompt_column: str = "tokens",
+        completion_column: str = "completion",
         tag: str = "validation",
         num_logs: tp.Optional[int] = None,
         empty_cache_after_generation: bool = False,
@@ -78,6 +80,8 @@ class ReferenceCompletionEvaluator(Evaluator):
         self._every_n_steps = every_n_steps
         self._dataset = dataset
         self._loader_config = dataloader_config
+        self._prompt_column = prompt_column
+        self._completion_column = completion_column
         self._tag = tag
         self._num_logs = num_logs
         self._empty_cache = empty_cache_after_generation
@@ -119,8 +123,8 @@ class ReferenceCompletionEvaluator(Evaluator):
         ):
             torch.cuda.empty_cache() if self._empty_cache else None
 
-            batch["tokens"] = batch["tokens"].to(model._device)
-            generated = model.generate(prompt=batch["tokens"])
+            batch[self._prompt_column] = batch[self._prompt_column].to(model._device)
+            generated = model.generate(prompt=batch[self._prompt_column])
 
             queries = []
             responses = []
@@ -131,7 +135,7 @@ class ReferenceCompletionEvaluator(Evaluator):
                 responses.append(self.decode(tokens[response_mask]))
 
             prompts.extend(queries)
-            completions.extend(list(zip(batch["completion"], responses)))
+            completions.extend(list(zip(batch[self._completion_column], responses)))
 
         wins = torch.tensor(self._arbiter.judge(prompts, completions))
         valid = wins != -1
@@ -153,6 +157,8 @@ def reference_completion_evaluator(
         dataset: Dataset,
         dataloader_config: DataloaderConfig,
         tag: str = "validation",
+        prompt_column: str = "tokens",
+        completion_column: str = "completion",
         num_logs: tp.Optional[int] = None,
         empty_cache_after_generation: bool = False
 ) -> ReferenceCompletionEvaluator:
@@ -162,6 +168,8 @@ def reference_completion_evaluator(
         every_n_steps=every_n_steps,
         dataset=dataset,
         dataloader_config=dataloader_config,
+        prompt_column=prompt_column,
+        completion_column=completion_column,
         tag=tag,
         num_logs=num_logs,
         empty_cache_after_generation=empty_cache_after_generation,

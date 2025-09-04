@@ -8,7 +8,8 @@ class AlpacaTransform(QATransform):
 
         return QAProblem(
             question = sample["instruction"],
-            answer = ""
+            answer = sample["output"],
+            cot = "",
         )
 
 
