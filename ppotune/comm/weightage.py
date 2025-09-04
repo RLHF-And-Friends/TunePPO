@@ -70,6 +70,55 @@ class SoftmaxRefinedUniform(Weightage):
         return refined / refined.sum()
 
 
+class PolicySimilarity(Weightage):
+    """
+    Computes weights based on policy similarity.
+    Uses either pure similarity normalization or composition with uniform self-preference.
+    """
+    def __init__(
+        self,
+        self_preference: tp.Optional[float | VolatileFloat] = None
+    ) -> None:
+        self._self_preference = self_preference
+        if self_preference is not None:
+            self._uniform = Uniform(self_preference)
+        else:
+            self._uniform = None
+
+    def __call__(
+        self,
+        similarities: tp.Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        if similarities is None:
+            # Fallback to uniform weights
+            if self._uniform is not None:
+                return self._uniform()
+            else:
+                return uniform()
+        
+        # Ensure similarities are on the correct device
+        device = similarities.device
+        
+        if self._self_preference is not None:
+            # Compose with uniform self-preference
+            uniform_weights = self._uniform().to(device)  # Move to same device as similarities
+            if similarities.sum() > 0:
+                normalized_similarities = similarities / similarities.sum()
+                # Blend: self_preference * uniform + (1 - self_preference) * similarity
+                self_pref_val = float(self._self_preference)
+                weights = self_pref_val * uniform_weights + (1 - self_pref_val) * normalized_similarities
+                return weights / weights.sum()
+            else:
+                return uniform_weights
+        else:
+            # Simple case: just normalize similarities to sum to 1
+            if similarities.sum() > 0:
+                return similarities / similarities.sum()
+            else:
+                # If all similarities are 0, use uniform
+                return uniform().to(device)
+
+
 # ----------------- Distributed Weightage Utility Builders ------------------ #
 #
 def uniform_weightage(
@@ -90,3 +139,8 @@ def softmax_refined_uniform_weightage(
         Uniform(self_preference),
         Softmax(temperature)
     )
+
+def policy_similarity_weightage(
+    self_preference: tp.Optional[float | VolatileFloat] = None
+) -> PolicySimilarity:
+    return PolicySimilarity(self_preference)

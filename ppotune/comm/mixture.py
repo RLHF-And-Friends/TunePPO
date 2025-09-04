@@ -44,6 +44,23 @@ class DistributedMixture(ABC):
         self._protocol = protocol
         self._policy = local_policy
         self._update_interval = update_interval
+        self._tokenizer = None
+        self._device = None
+        self._forward_batch_size = 8  # Default, can be overridden
+        self._empty_cache = False
+
+    def setup_similarity_dataloader(self, similarity_dataloader, tokenizer, device, forward_batch_size=8, empty_cache=False):
+        """
+        Setup similarity dataloader for policy similarity protocols.
+        This encapsulates the similarity computation logic within the mixture.
+        """
+        self._tokenizer = tokenizer
+        self._device = device
+        self._forward_batch_size = forward_batch_size
+        self._empty_cache = empty_cache
+        
+        if hasattr(self._protocol, 'setup_similarity_dataloader'):
+            self._protocol.setup_similarity_dataloader(similarity_dataloader)
 
     def forward(
         self,
@@ -73,9 +90,32 @@ class DistributedMixture(ABC):
         stats: PPOTrajectoryStats
     ) -> None:
         """
-        Gather train statistics.
+        Gather policy statistics.
         """
-        self._protocol.gather(stats)
+        # Check if protocol needs policy generation
+        if (hasattr(self._protocol, '_needs_policy_generation') and 
+            hasattr(self._protocol, '_similarity_iter') and
+            self._protocol._similarity_iter is not None and
+            self._tokenizer is not None):
+            
+            # Generate policy batch internally
+            test_batch = next(self._protocol._similarity_iter)
+            policy_batch = self._protocol._generate_policy_batch(
+                self._policy, test_batch, self._tokenizer, 
+                self._device, self._forward_batch_size, self._empty_cache
+            )
+            
+            # Create modified stats with policy batch
+            stats_with_policy = stats._replace(policy_batch=policy_batch)
+            self._protocol.gather(stats_with_policy)
+            
+            # Reset the flag
+            self._protocol._needs_policy_generation = False
+            
+            if self._empty_cache:
+                torch.cuda.empty_cache()
+        else:
+            self._protocol.gather(stats)
 
     def update(
         self

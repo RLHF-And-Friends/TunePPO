@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 
 from dataclasses import dataclass
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torchtune.modules.transforms.tokenizers import ModelTokenizer
 
 from ppotune.data.subsets import subset, distributed_subset
@@ -121,3 +121,47 @@ def distributed_dataloader(
         num_epochs=num_epochs,
         seed=seed,
     )
+
+
+def synchronized_dataloader(
+    tokenizer: ModelTokenizer,
+    dataset: Dataset,
+    batch_size: int,
+    group_size: int = 1,
+    seed: int = 0,
+) -> DataLoader:
+    """
+    Dataloader that ensures all agents get the same infinite batches from full dataset.
+    """
+    assert batch_size % group_size == 0
+    raw_batch_size = batch_size // group_size
+
+    generator = torch.Generator().manual_seed(seed)
+
+    sampler = RepeatedSampler(
+        GroupedSampler(
+            RandomSampler(dataset, replacement=True, generator=generator),
+            group_factor=group_size,
+        ),
+        num_epochs=999999  # effectively infinite
+    )
+    collator = LeftPadCollator(
+        tokens_key="tokens",
+        pad_token=tokenizer.pad_id
+    )
+    return DataLoader(
+        dataset=dataset,
+        sampler=sampler,
+        batch_size=batch_size,
+        drop_last=True,
+        collate_fn=collator
+    )
+
+
+__all__ = [
+    "DataloaderConfig",
+    "build_dataloader",
+    "dataloader",
+    "distributed_dataloader",
+    "synchronized_dataloader"
+]

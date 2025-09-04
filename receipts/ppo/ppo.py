@@ -172,6 +172,28 @@ class PPORecipe(FTRecipeInterface):
             cfg.reference,
             local_policy=self.policy
         )
+        
+        # Setup similarity dataloader if configured
+        if 'similarity_dataset' in cfg:
+            similarity_dataset: Dataset = instantiate(cfg.similarity_dataset)
+            similarity_dataset.setup(self._tokenizer)
+            similarity_dataloader = instantiate(
+                cfg.similarity_dataloader,
+                tokenizer=self._tokenizer,
+                dataset=similarity_dataset,
+                seed=self.seed
+            )
+            
+            # Setup similarity dataloader in reference policy (if it supports it)
+            if hasattr(self._ref_policy, 'setup_similarity_dataloader'):
+                self._ref_policy.setup_similarity_dataloader(
+                    similarity_dataloader, 
+                    self._tokenizer, 
+                    self._device,
+                    self._forward_batch_size,
+                    self._empty_cache
+                )
+        
         # instantiate kl penalty module
         self.kl: KLPenalty = instantiate(cfg.kl_penalty)
 
@@ -280,7 +302,41 @@ class PPORecipe(FTRecipeInterface):
             values              = advantage_trajectory.values,
             returns             = advantage_trajectory.returns,
             scores              = advantage_trajectory.scores,
+            policy_batch        = None,
         )
+
+    def _concat_trajectories(self, trajectories: List[PPOTrajectoryStats]) -> PPOTrajectoryStats:
+        """
+        Concatenate multiple trajectories, handling None values properly.
+        """
+        def safe_concat(field_values):
+            # Filter out None values
+            non_none_values = [v for v in field_values if v is not None]
+            if not non_none_values:
+                return None
+            # If all values are None, return None
+            if len(non_none_values) != len(field_values):
+                # Some values are None - for policy_batch this is expected
+                if all(v is None for v in field_values):
+                    return None
+                # Mixed None and non-None values - use non-None ones
+                return non_none_values[0] if len(non_none_values) == 1 else non_none_values
+            # All values are non-None tensors
+            return torch.cat(non_none_values)
+        
+        # Use zip to get field values across all trajectories
+        field_values = list(zip(*trajectories))
+        concatenated = []
+        
+        for i, values in enumerate(field_values):
+            if i == len(PPOTrajectoryStats._fields) - 1:  # policy_batch is the last field
+                # Handle policy_batch specially - it can be None or list of tensors
+                concatenated.append(safe_concat(values))
+            else:
+                # All other fields should be tensors
+                concatenated.append(torch.cat(values))
+        
+        return PPOTrajectoryStats(*concatenated)
 
     def generate_trajectory_batched(
         self,
@@ -309,7 +365,7 @@ class PPORecipe(FTRecipeInterface):
             trajectories.append(self.generate_trajectory(subbatch))
             torch.cuda.empty_cache() if empty_cache else None
 
-        trajectory = PPOTrajectoryStats(*map(torch.cat, zip(*trajectories)))
+        trajectory = self._concat_trajectories(trajectories)
         wandb_logger.collect_dict({
             "num_stop_tokens": trajectory.responses_pad_mask.any(-1).sum().float(),
             "response_lengths": training.get_unmasked_sequence_lengths(
@@ -348,15 +404,14 @@ class PPORecipe(FTRecipeInterface):
                             j : j + self._ppo_backward_batch_size
                         ]
 
+                        def safe_index_select(tensor):
+                            """Safely index select, handling None values"""
+                            if tensor is None:
+                                return None
+                            return torch.index_select(tensor, dim=0, index=backward_batch_idxs)
+
                         batch_trajectory = PPOTrajectoryStats(
-                            *map(
-                                partial(
-                                    torch.index_select,
-                                    dim=0,
-                                    index=backward_batch_idxs,
-                                ),
-                                trajectory,
-                            )
+                            *map(safe_index_select, trajectory)
                         )
                         self.ppo_step(batch_trajectory)
                         del batch_trajectory

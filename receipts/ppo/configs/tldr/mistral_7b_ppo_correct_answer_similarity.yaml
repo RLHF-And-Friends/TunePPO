@@ -1,0 +1,174 @@
+# Config for Policy Similarity Protocol with correct answer logprobs
+# 
+# This config demonstrates the correct approach where policy similarity is computed
+# based on logprobs of the CORRECT answer from test-split, not generated answers.
+#
+# Key difference: All agents evaluate the same correct answer from test dataset,
+# comparing how well each model predicts the ground truth tokens.
+
+prefix: ~/.tune
+
+project: TLDR-Mistral-PPO-CorrectAnswer-Similarity
+group: Mistral-Base-PPO-CorrectAnswer-Similarity
+model: Mistral-7B-Base
+reward: TLDR-Mistral-7B-SmallSFT-RM
+run: PPO-CorrectAnswerSimilarity
+
+output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
+
+seed: 0xD1CE
+
+empty_cache_after_generation: False
+
+# ---------------------------------- Data ----------------------------------- #
+
+tokenizer:
+  _component_: ppotune.tokenizers.mistral2_tokenizer
+  path: ${prefix}/models/${model}/tokenizer.model
+  max_seq_len: 2500
+
+# Training data - different for each agent  
+dataset:
+  _component_: ppotune.data.sets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
+  split: train
+
+dataloader:
+  _component_: ppotune.data.loaders.distributed_dataloader
+  batch_size: 64
+  num_steps: 26
+  num_epochs: 6
+
+# Test data for policy similarity - same correct answers for all agents
+similarity_dataset:
+  _component_: ppotune.data.sets.tldr_dataset
+  source: RLHF-And-Friends/tldr-ppo
+  split: test
+
+similarity_dataloader:
+  _component_: ppotune.data.loaders.synchronized_dataloader
+  batch_size: 64
+  group_size: 1
+
+evaluator:
+  _component_: ppotune.evaluation.reference_completion_evaluator
+  arbiter:
+    _component_: ppotune.arbiters.tldr_arbiter
+    base_url: https://api.deepinfra.com/v1/openai
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  every_n_steps: 13
+  dataset:
+    _component_: ppotune.data.sets.tldr_dataset
+    source: RLHF-And-Friends/tldr-ppo
+    split: validation
+  dataloader_config:
+    batch_size: 8
+    num_steps: 16
+  empty_cache_after_generation: True
+
+# PPO Optimization Parameters
+ppo_epochs: 2
+ppo_batch_size: 32
+gradient_accumulation_steps: 4
+forward_batch_size: 8
+
+# --------------------------------- Policy ---------------------------------- #
+
+policy:
+  _component_: ppotune.model.GenerativeLoRAModel
+  generation_batch_size: ${forward_batch_size}
+  max_response_len: 58
+  temperature: 0.7
+  top_k: null
+  model:
+    _component_: torchtune.models.mistral.lora_mistral_7b
+    lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+    apply_lora_to_mlp: True
+    apply_lora_to_output: False
+    lora_rank: 64
+    lora_alpha: 16
+    lora_dropout: 0.0
+    quantize_base: False
+  ckpt:
+    _component_: torchtune.training.FullModelHFCheckpointer
+    checkpoint_dir: ${prefix}/models/${model}/
+    checkpoint_files:
+      [
+        "model-00001-of-00003.safetensors",
+        "model-00002-of-00003.safetensors", 
+        "model-00003-of-00003.safetensors",
+      ]
+    recipe_checkpoint: null
+    output_dir: ${output_dir}/policy
+    model_type: MISTRAL
+
+# ---------------------------- Advantage Model ------------------------------ #
+
+advantage:
+  _component_: ppotune.advantage.GAE
+  gamma: 1
+  lmbda: 0.95
+  value_coeff: 0.1
+  value_clip_range: 0.2
+  reward:
+    _component_: ppotune.reward.PerTokenKLPenalizedRewardModel
+    min_response_len: 18
+    penalise_no_eos: True
+    reward_penalty: -3
+    kl_coeff: 0.1
+
+    scorer:
+      _component_: ppotune.model.LoRAModel
+      ckpt:
+        _component_: torchtune.training.FullModelHFCheckpointer
+        checkpoint_dir: ${prefix}/models/${reward}/
+        checkpoint_files:
+          [
+            "model-00001-of-00003.safetensors",
+            "model-00002-of-00003.safetensors",
+            "model-00003-of-00003.safetensors",
+          ]
+        output_dir: ${output_dir}/scorer
+        model_type: REWARD
+
+      model:
+        _component_: torchtune.models.mistral.lora_mistral_reward_7b
+        lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+        apply_lora_to_mlp: True
+        apply_lora_to_output: True
+        lora_rank: 16
+        lora_alpha: 32
+        lora_dropout: 0.0
+        quantize_base: False
+
+# ---------------------------- Reference Model ------------------------------ #
+
+reference:
+  _component_: ppotune.comm.distributed_weight_mixture
+  update_every_n_steps: 13
+  protocol:
+    _component_: ppotune.comm.policy_similarity_protocol
+    weightage:
+      _component_: ppotune.comm.policy_similarity_weightage
+
+# --------------------------------- Other ----------------------------------- #
+
+optimizer:
+  _component_: bitsandbytes.optim.PagedAdamW
+  lr: 1e-4
+
+dtype: bf16
+
+kl_penalty:
+  _component_: ppotune.loss.KLPenalty
+  coeff: 0.0
+
+epsilon: 0.2
+
+# Logging
+wandb_logger:
+  dir: ${prefix}
+  entity: RADFAN
+  project: ${project}
+  group: ${group}
+  name: ${model}-${run} 
