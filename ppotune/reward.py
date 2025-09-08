@@ -647,7 +647,7 @@ class LLMBasedMultiHopQAShapedReward(IRewardModel):
             messages=messages,
             **self._api_request_kwargs,
         )
-        completion_text = completion.choices[0].message.content 
+        completion_text = completion.choices[0].message.content
 
         completion_without_reasoning = self.remove_reasoning(completion_text)
         # print(f"Completion without reasoning: {completion_without_reasoning}")
@@ -677,14 +677,29 @@ class GraphMultihopQAReward(IRewardModel):
         dataset_filepath: str,
         triplets_prompt_filepath: str,
         triplets_model: str,
-        norm_lev_threshold: float
+        base_url: str | None = None,
+        norm_lev_threshold: float = 0.8,
+        **triplets_generation_params,
     ) -> None:
         self.entity_aliases_filepath: PurePath = Path(entity_aliases_filepath)
         self.relation_aliases_filepath: PurePath = Path(relation_aliases_filepath)
         self.dataset_filepath: PurePath = Path(dataset_filepath)
         self.triplets_prompt_filepath: PurePath = Path(triplets_prompt_filepath)
         self.triplets_model: str = triplets_model
+        self.base_url: str = base_url
         self.norm_lev_threshold: float = norm_lev_threshold
+        self.triplets_generation_params = triplets_generation_params
+
+        self._graph_creator = GraphCreator(
+            entity_aliases_filepath=self.entity_aliases_filepath,
+            relation_aliases_filepath=self.relation_aliases_filepath,
+            dataset_filepath=self.dataset_filepath,
+            triplets_prompt_filepath=self.triplets_prompt_filepath,
+            openai_client=OpenAI(base_url=self.base_url),
+            triplets_model=self.triplets_model,
+            norm_lev_threshold=self.norm_lev_threshold,
+            **self.triplets_generation_params,
+        )
 
     def named_parameters(
         self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
@@ -715,20 +730,10 @@ class GraphMultihopQAReward(IRewardModel):
         final_answers = batch["final_answer"]
         paths = batch["path"]
 
-        graph_creator = graph_creator = GraphCreator(
-            entity_aliases_filepath=self.entity_aliases_filepath,
-            relation_aliases_filepath=self.relation_aliases_filepath,
-            dataset_filepath=self.dataset_filepath,
-            triplets_prompt_filepath=self.triplets_prompt_filepath,
-            openai_client=OpenAI(),
-            triplets_model="gpt-4.1-mini-2025-04-14",
-            norm_lev_threshold=0.8,
-        )
-
         with ThreadPoolExecutor() as executor:
             scores, successes = zip(
                 *executor.map(
-                    partial(self.shaped_correctness_reward, graph_creator),
+                    partial(self.shaped_correctness_reward, self._graph_creator),
                     final_answers,
                     paths,
                     responses
@@ -784,7 +789,7 @@ class GraphMultihopQAReward(IRewardModel):
             return reward, success
 
         if len(tags["think"]) > 0:
-            reasoning = tags["think"][0] 
+            reasoning = tags["think"][0]
         else:
             reasoning = ""
 
@@ -799,7 +804,7 @@ class GraphMultihopQAReward(IRewardModel):
 
         similarity = graph.compare_to(ground_truth_graph)
 
-        reward += similarity * 50
+        reward += similarity
 
         if len(tags["answer"]) > 0 and tags["answer"][-1] in final_answer:
             reward = 100.0

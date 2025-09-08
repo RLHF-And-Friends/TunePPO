@@ -42,6 +42,14 @@ BASIC_REASONING_SYSTEM_PROMPT = (
     "here</think> <answer>answer here</answer>."
 )
 
+MODIFIED_REASONING_SYSTEM_PROMPT = (
+    "A conversation between User and Assistant. The user asks a question, and "
+    "the Assistant solves it. Assistant's response consists of thinking and the answer. The "
+    "thinking and answer are enclosed within <think></think> and "
+    "<answer></answer> tags, respectively, i.e., <think>reasoning process</think>"
+    "<answer>answer here</answer>."
+)
+
 # -------------------------------------------------------------------------------------------------
 # Prompt tamplate for non-chat models
 # -------------------------------------------------------------------------------------------------
@@ -178,13 +186,15 @@ class ThreeHopTransform(MultihopTransform):
 two_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=TwoHopTransform(),
-    system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
     prompt_tamplate=BASIC_PROMPT_TEMPLATE,
 )
 three_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=ThreeHopTransform(),
-    system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
     prompt_template=BASIC_PROMPT_TEMPLATE
 )
 

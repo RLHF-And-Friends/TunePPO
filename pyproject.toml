@@ -18,12 +18,10 @@ dependencies = [
 	"bitsandbytes",
 	"transformers", # for tokenizers with chat templates
 	# logging
-	"wandb",
+	"wandb==0.21.0",
 	# evaluation
 	"openai",
-	"vllm==0.8.5.post1",
-    # other
-    "smart-thinking-llm==0.1.0"
+	"vllm==0.8.5.post1"
 ]
 
 # --------------------------- Build Specification --------------------------- #
