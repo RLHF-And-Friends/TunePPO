@@ -7,6 +7,7 @@ import torch.distributed as dist
 
 from omegaconf import DictConfig, OmegaConf
 from torchtune.training.metric_logging import MetricLoggerInterface, Scalar
+from pathlib import Path
 
 
 class WandbLogger(MetricLoggerInterface):
@@ -121,3 +122,61 @@ class WandbLogger(MetricLoggerInterface):
 
     def close(self) -> None:
         wandb.finish()
+
+class DiskLogger(MetricLoggerInterface):
+    """
+    Singleton class to log into disk.
+    """
+    _instance: tp.Optional[tp.Self] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DiskLogger, cls).__new__(cls)
+
+        return cls._instance
+
+    def setup(self, config: DictConfig) -> None:
+        """
+        Initialize wandb itself with separate runs for each device.
+        """
+        log_dir = config.get("log_dir")
+        filename = config.get("filename")
+
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._file_name = self.log_dir / filename
+        self._file = open(self._file_name, "a")
+        print(f"Writing logs to {self._file_name}")
+
+        self._completions: list[tp.Dict[str, str | torch.Tensor]] = []
+
+
+    def log_dict(self, payload: tp.Mapping[str, Scalar], step: int) -> None:
+        self._file.write(f"Step {step} | ")
+        for name, data in payload.items():
+            self._file.write(f"{name}:{data} ")
+        self._file.write("\n")
+        self._file.flush()
+
+    def collect_completion(self, completion: str, score: torch.Tensor, final_answer: str, path: str) -> None:
+        """
+        Collect completion and score.
+        """
+        raw = {
+            "completion": completion,
+            "score": score,
+            "final_answer": final_answer,
+            "path": path
+        }
+        self._completions.append(raw)
+
+    def flush(self, step: int) -> None:
+        """
+        Flush the log buffer to wandb.
+        """
+        for raw in self._completions:
+            self.log_dict(raw, step)
+        self._completions = []
+
+    def close(self) -> None:
+        self._file.close()

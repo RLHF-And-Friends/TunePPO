@@ -679,6 +679,15 @@ class GraphMultihopQAReward(IRewardModel):
         triplets_model: str,
         base_url: str | None = None,
         norm_lev_threshold: float = 0.8,
+
+        answer_tag_reward: float = 5.0,
+        think_tag_reward: float = 5.0,
+        correct_answer_reward: float = 100.0,
+        similarity_reward: float = 20.0,
+        format_penalty_reward: float = 3.0,
+        reasoning_length_penalty_reward: float = 0.0,
+        min_reasoning_length: int | None = 0,
+
         **triplets_generation_params,
     ) -> None:
         self.entity_aliases_filepath: PurePath = Path(entity_aliases_filepath)
@@ -689,6 +698,14 @@ class GraphMultihopQAReward(IRewardModel):
         self.base_url: str = base_url
         self.norm_lev_threshold: float = norm_lev_threshold
         self.triplets_generation_params = triplets_generation_params
+
+        self.answer_tag_reward: float = answer_tag_reward
+        self.think_tag_reward: float = think_tag_reward
+        self.correct_answer_reward: float = correct_answer_reward
+        self.similarity_reward: float = similarity_reward
+        self.format_penalty_reward: float = format_penalty_reward
+        self.reasoning_length_penalty_reward: float = reasoning_length_penalty_reward
+        self.min_reasoning_length: int | None = min_reasoning_length
 
         self._graph_creator = GraphCreator(
             entity_aliases_filepath=self.entity_aliases_filepath,
@@ -784,7 +801,7 @@ class GraphMultihopQAReward(IRewardModel):
         success = 0.0
 
         try:
-            tags = self.extract_tags(completion)
+            tags, content_len = self.extract_tags_and_content_length(completion)
         except ElementTree.ParseError:
             return reward, success
 
@@ -793,34 +810,44 @@ class GraphMultihopQAReward(IRewardModel):
         else:
             reasoning = ""
 
+        if self.min_reasoning_length is not None:
+            reasoning_length = len(reasoning.split())
+            reward -= max(0, reasoning_length - self.min_reasoning_length) * self.reasoning_length_penalty_reward
+
         if len(tags["answer"]) == 1:
-            reward += 5.0
+            reward += self.answer_tag_reward
 
         if len(tags["think"]) == 1:
-            reward += 5.0
-
-        ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
-        graph = graph_creator(reasoning)
-
-        similarity = graph.compare_to(ground_truth_graph)
-
-        reward += similarity
+            reward += self.think_tag_reward
 
         if len(tags["answer"]) > 0 and tags["answer"][-1] in final_answer:
-            reward = 100.0
+            reward += self.correct_answer_reward
             success = 1
+
+        else:
+            ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
+            graph = graph_creator(reasoning)
+            similarity = graph.compare_to(ground_truth_graph)
+
+            reward += similarity * self.similarity_reward
+
+        reward -= content_len * self.format_penalty_reward
+
+        # if content_len == 0:
+        #     reward += 10
 
         return reward, success
 
     @staticmethod
-    def extract_tags(text: str) -> dict[str, list[str]]:
+    def extract_tags_and_content_length(text: str) -> tuple[dict[str, list[str]], str]:
         """
         Parse XML-like tags from text. Returns a dictionary with keys 'think' and 'answer'.
         The values are lists of strings, with each string being the content of a tag.
         """
         xml_string = f"<root>{text}</root>"
         root = ElementTree.fromstring(xml_string)
-        return {
+
+        tags = {
             "think": [
                 elem.text if elem.text is not None else "" for elem in root.findall("think")
             ],
@@ -828,3 +855,13 @@ class GraphMultihopQAReward(IRewardModel):
                 elem.text if elem.text is not None else "" for elem in root.findall("answer")
             ],
         }
+        
+        content_length = 0
+        if root.text:
+            content_length += len(root.text.split())
+
+        for elem in root.iter():
+            if elem.tail:
+                content_length += len(elem.tail.split())
+
+        return tags, content_length

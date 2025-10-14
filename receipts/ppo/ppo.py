@@ -34,12 +34,14 @@ from ppotune.data.types import (
 from ppotune.evaluation import Evaluator
 from ppotune.loss import KLPenalty
 from ppotune.log import WandbLogger
+from ppotune.log import DiskLogger
 from ppotune.model import GenerativeLoRAModel
 from ppotune.utils import grad_norm
 
 
 log = utils.get_logger("DEBUG")
 wandb_logger = WandbLogger()
+disk_logger = DiskLogger()
 
 
 class PPORecipe(FTRecipeInterface):
@@ -128,6 +130,8 @@ class PPORecipe(FTRecipeInterface):
         # setup logger
         wandb_logger.setup(cfg.wandb_logger)
         wandb_logger.log_config(cfg)
+
+        disk_logger.setup(cfg.disk_logger)
 
         # setup data
         self._tokenizer: PreTrainedTokenizerBase | ModelTokenizer = instantiate(
@@ -269,6 +273,12 @@ class PPORecipe(FTRecipeInterface):
         wandb_logger.collect_completion(
             sample_completion, advantage_trajectory.scores[0]
         )
+
+        for i, completion in enumerate(generated.tokens):
+            disk_logger.collect_completion(
+                self._tokenizer.decode(completion[tokens_mask[i]].tolist(), skip_special_tokens=False), 
+                float(advantage_trajectory.scores[i].cpu().numpy()[0]), batch["final_answer"], batch["path"][0]
+            )
         return PPOTrajectoryStats(
             query_responses     = generated.tokens,
             causal_mask         = causal_mask,
@@ -370,6 +380,7 @@ class PPORecipe(FTRecipeInterface):
             self._ref_policy.update_at(step)
 
             wandb_logger.flush(step=step)
+            disk_logger.flush(step=step)
             self.cleanup_after_step(trajectory)
 
         self.policy.save_checkpoint()
@@ -464,6 +475,7 @@ class PPORecipe(FTRecipeInterface):
 
     def cleanup(self, **kwargs) -> None:
         wandb_logger.close()
+        disk_logger.close()
         dist.destroy_process_group()
 
 
