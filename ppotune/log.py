@@ -42,6 +42,25 @@ class WandbLogger(MetricLoggerInterface):
         self._completions = wandb.Table( # TODO: deprecate in favor of table reference
             columns=["completion", "score"]
         )
+        self._completions_with_graphs = wandb.Table(
+            columns=[
+                "question",
+                "completion",
+                "reasoning",
+                "answer",
+                "ground_truth_graph_path",
+                "completion_graph_path",
+                "answer_tag_reward",
+                "think_tag_reward",
+                "correct_answer_reward",
+                "similarity_penalty_reward",
+                "reasoning_length_penalty_reward",
+                "answer_length_penalty_reward",
+                "format_penalty_reward",
+                "score"
+            ],
+            dtype=[str, str, str, str, str, str, float, float, float, float, float, float, float, float]
+        )
         self._table_reference: tp.Dict[str, wandb.Table] = {}
 
         wandb.init(
@@ -90,6 +109,43 @@ class WandbLogger(MetricLoggerInterface):
         """
         self._completions.add_data(completion, score)
 
+    def collect_completion_with_graph(
+        self,
+        question: str,
+        completion: str,
+        reasoning: str,
+        answer: str,
+        ground_truth_graph_path: str,
+        completion_graph_path: str,
+        answer_tag_reward: float,
+        think_tag_reward: float,
+        correct_answer_reward: float,
+        similarity_penalty_reward: float,
+        reasoning_length_penalty_reward: float,
+        answer_length_penalty_reward: float,
+        format_penalty_reward: float,
+        score: float,
+    ) -> None:
+        """
+        Collect completion and score with graph with all rewards and paths.
+        """
+        self._completions_with_graphs.add_data(
+            question,
+            completion,
+            reasoning,
+            answer,
+            ground_truth_graph_path,
+            completion_graph_path,
+            answer_tag_reward,
+            think_tag_reward,
+            correct_answer_reward,
+            similarity_penalty_reward,
+            reasoning_length_penalty_reward,
+            answer_length_penalty_reward,
+            format_penalty_reward,
+            score
+        )
+
     def collect_table(
         self,
         name: str,
@@ -115,9 +171,30 @@ class WandbLogger(MetricLoggerInterface):
 
         if len(self._completions.data) != 0:
             self.log("completions", self._completions, step)
-            self._completions = wandb.Table(columns=[
-                "completion", "score"
-            ])
+            self._completions = wandb.Table(
+                columns=["completion", "score"],
+            )
+        if len(self._completions_with_graphs.data) != 0:
+            self.log("completions_with_graphs", self._completions_with_graphs, step)
+            self._completions_with_graphs = wandb.Table(
+                columns=[
+                    "question",
+                    "completion",
+                    "reasoning",
+                    "answer",
+                    "ground_truth_graph_path",
+                    "completion_graph_path",
+                    "answer_tag_reward",
+                    "think_tag_reward",
+                    "correct_answer_reward",
+                    "similarity_penalty_reward",
+                    "reasoning_length_penalty_reward",
+                    "answer_length_penalty_reward",
+                    "format_penalty_reward",
+                    "score"
+                ],
+                dtype=[str, str, str, str, str, str, float, float, float, float, float, float, float, float]
+            )
 
 
     def close(self) -> None:

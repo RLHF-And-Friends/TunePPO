@@ -47,17 +47,37 @@ MODIFIED_REASONING_SYSTEM_PROMPT = (
     "the Assistant solves it. Assistant's response consists of thinking and the answer. The "
     "thinking and answer are enclosed within <think></think> and "
     "<answer></answer> tags, respectively, i.e., <think>reasoning process</think>"
-    "<answer>answer here</answer>."
+    "<answer>answer here</answer>. You need reply only by one <answer>...</answer> section and one <think>...</think> section. "
+    "After first <answer>...</answer> section, you need to stop generating any text and return <|eot_id|> token. "
+    "Answer section should be short and concise. Thinking section should be detailed and comprehensive.\n"
 )
+
+REASONING_SYSTEM_PROMPT_V2 = """
+A conversation between User and Assistant. The user asks a question, and the Assistant solves it using structured thinking.
+Format your response as:
+<think>
+Known facts: [List specific facts you know]
+Analysis: [Connect these facts logically]
+Conclusion: [What follows from the facts]
+</think>
+<answer>[concise answer]</answer>
+
+Rules:
+- Present only factual information and logical reasoning
+- No meta-commentary about your thinking process
+- No "I need to search" or "I will consider" statements
+- Stop after </answer> tag with <|eot_id|>
+- Answer section should be short and concise. Thinking section should be detailed and comprehensive.
+- You need reply only by one <answer>...</answer> section and one <think>...</think> section."""
 
 # -------------------------------------------------------------------------------------------------
 # Prompt tamplate for non-chat models
 # -------------------------------------------------------------------------------------------------
 
 BASIC_PROMPT_TEMPLATE: PromptTemplate = {
-    "system": PrefixSuffix("", " "),
-    "user": PrefixSuffix("User: ", " "),
-    "assistant": PrefixSuffix("Assistant: ", "")
+    "system": PrefixSuffix("System prompt: ", "\n"),
+    "user": PrefixSuffix("User: ", "\n"),
+    "assistant": PrefixSuffix("Assistant: ", "\n"),
 }
 
 # -------------------------------------------------------------------------------------------------
@@ -68,11 +88,10 @@ class MultiHopProblem(tp.TypedDict):
     answers: tp.List[str]
     path: str
     final_answer: tp.List[str]
- 
+
 
 class MultihopTransform(Transform):
-    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
-        ...
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem: ...
 
 
 class MultiHopDataset(Dataset):
@@ -102,13 +121,7 @@ class MultiHopDataset(Dataset):
         """
         messages = []
         if self._system_prompt is not None:
-            messages.append(
-                Message(
-                    role="system",
-                    content=self._system_prompt,
-                    eot=True
-                )
-            )
+            messages.append(Message(role="system", content=self._system_prompt, eot=True))
         messages.append(
             Message(
                 role="user",
@@ -120,17 +133,14 @@ class MultiHopDataset(Dataset):
         tokens = []
         if self._prompt_template is None:
             tokens = self._tokenizer.tokenize_messages(
-                messages=messages,
-                add_generation_prompt=True
+                messages=messages, add_generation_prompt=True
             )
         else:
             text = apply_prompt_template(
-                template=self._prompt_template,
-                messages=messages,
-                add_generation_prompt=True
+                template=self._prompt_template, messages=messages, add_generation_prompt=True
             )
             tokens = self._tokenizer.encode(text, add_eos=False)
-            tokens = tokens[:self._tokenizer.max_seq_len]
+            tokens = tokens[: self._tokenizer.max_seq_len]
 
         return tokens
 
@@ -141,11 +151,22 @@ class MultiHopDataset(Dataset):
             "tokens": tokens,
             "answers": sample["answers"],
             "path": sample["path"],
-            "final_answer": sample["final_answer"]
+            "final_answer": sample["final_answer"],
         }
 
     def __len__(self) -> int:
         return len(self._data)
+
+
+class OneHopTransform(MultihopTransform):
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
+        question = sample["generated_question"]  # use only first question in 2hop
+        answers = [sample["first_entity_aliases"]]
+        final_answer = sample["second_entity_aliases"]
+        path = sample["path"]
+        return MultiHopProblem(
+            question=question, answers=answers, path=path, final_answer=final_answer
+        )
 
 
 class TwoHopTransform(MultihopTransform):
@@ -158,10 +179,7 @@ class TwoHopTransform(MultihopTransform):
         path = sample["path"]
 
         return MultiHopProblem(
-            question=question,
-            answers=answers,
-            path=path,
-            final_answer=final_answer
+            question=question, answers=answers, path=path, final_answer=final_answer
         )
 
 
@@ -176,12 +194,17 @@ class ThreeHopTransform(MultihopTransform):
         path = sample["path"]
 
         return MultiHopProblem(
-            question=question,
-            answers=answers,
-            path=path,
-            final_answer=final_answer
+            question=question, answers=answers, path=path, final_answer=final_answer
         )
 
+
+one_hop_dataset = partial(
+    MultiHopDataset,
+    sample_transform=OneHopTransform(),
+    # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
+    prompt_template=BASIC_PROMPT_TEMPLATE,
+)
 
 two_hop_dataset = partial(
     MultiHopDataset,
@@ -195,6 +218,5 @@ three_hop_dataset = partial(
     sample_transform=ThreeHopTransform(),
     # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
     system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
-    prompt_template=BASIC_PROMPT_TEMPLATE
+    prompt_template=BASIC_PROMPT_TEMPLATE,
 )
-
