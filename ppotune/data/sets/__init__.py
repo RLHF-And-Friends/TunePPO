@@ -26,6 +26,15 @@ from ppotune.data.sets.helpsteer import (
 from ppotune.data.sets.wiki_lingua import (
     wiki_lingua_dataset
 )
+from ppotune.data.sets.math import (
+    math_dataset,
+    chat_math_dataset,
+    plain_math_dataset,
+    math500_dataset,
+    eval_math_dataset,
+    hendrycks_math_dataset,
+    plain_hendrycks_math_dataset,
+)
 
 __all__ = [
     "gsm8k_dataset",
@@ -36,4 +45,11 @@ __all__ = [
     "eval_gsm8k_dataset",
     "helpsteer_dataset",
     "wiki_lingua_dataset",
+    "math_dataset",
+    "chat_math_dataset",
+    "plain_math_dataset",
+    "math500_dataset",
+    "eval_math_dataset",
+    "hendrycks_math_dataset",
+    "plain_hendrycks_math_dataset",
 ]

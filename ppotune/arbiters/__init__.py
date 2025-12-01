@@ -10,6 +10,10 @@ from ppotune.arbiters.gsm8k_arbiter import (
     gsm8k_arbiter,
     sequential_gsm8k_arbiter,
 )
+from ppotune.arbiters.math_arbiter import (
+    math_arbiter,
+    sequential_math_arbiter,
+)
 
 __all__ = [
     "default_arbiter",
@@ -18,5 +22,7 @@ __all__ = [
     "sequential_tldr_arbiter",
     "gsm8k_arbiter",
     "sequential_gsm8k_arbiter",
+    "math_arbiter",
+    "sequential_math_arbiter",
 ]
 
