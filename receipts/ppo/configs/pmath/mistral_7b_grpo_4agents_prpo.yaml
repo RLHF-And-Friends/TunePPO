@@ -1,0 +1,168 @@
+# Config for 4-agent RLHF (Q)LoRA GRPO finetuning of Mistral 7B on Hendrycks MATH dataset.
+# WITH PRPO COMMUNICATION (self_preference=0.8)
+#
+# 4 agents on 4 largest subjects:
+#   - Agent 0: algebra (1,744 train)
+#   - Agent 1: intermediate_algebra (1,295 train)
+#   - Agent 2: prealgebra (1,205 train)
+#   - Agent 3: geometry (870 train)
+#
+# Smallest subject: geometry (870 samples)
+# With batch_size=20, group_size=4, num_steps=40: 20*40=800 samples/epoch (fits in geometry)
+#
+# To launch on 4 devices:
+#   tune run --nproc_per_node 4 receipts/ppo/ppo.py --config receipts/ppo/configs/pmath/mistral_7b_grpo_4agents_prpo.yaml
+
+
+prefix: ~/.tune
+
+project: PMATH
+group: Mistral-7B-Base-GRPO-4Agents-PRPO
+model: Mistral-7B-Base
+run: GRPO-SP08
+
+output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
+
+seed: 0xD1CE
+
+empty_cache_after_generation: True
+
+
+# ---------------------------------- Data ----------------------------------- #
+#
+tokenizer:
+  _component_: ppotune.tokenizers.mistral2_tokenizer
+  path: ${prefix}/models/${model}/tokenizer.model
+  max_seq_len: 2500
+
+# 4 subjects for 4 agents (largest 4 by train size)
+dataset:
+  _component_: ppotune.data.sets.plain_hendrycks_math_dataset
+  split: train
+  subjects:
+    0: [algebra]
+    1: [intermediate_algebra]
+    2: [prealgebra]
+    3: [geometry]
+
+dataloader:
+  _component_: ppotune.data.loaders.distributed_dataloader
+  batch_size: 20
+  group_size: 4
+  num_steps: 40  # 20*40=800 samples/epoch, fits in geometry (870)
+  num_epochs: 10
+
+evaluator:
+  _component_: ppotune.evaluation.evaluation_group
+  evaluators:
+    # global evaluation on MATH-500
+    - _component_: ppotune.evaluation.math_evaluator
+      tag: global
+      arbiter:
+        _component_: ppotune.arbiters.math_arbiter
+        model: gpt-4o-mini
+      every_n_steps: 100
+      dataset:
+        _component_: ppotune.data.sets.math500_dataset
+        split: test
+      dataloader_config:
+        batch_size: 4
+        num_steps: 10
+      empty_cache_after_generation: True
+    # local evaluation (same subjects as training) using test split
+    - _component_: ppotune.evaluation.math_evaluator
+      tag: local
+      arbiter:
+        _component_: ppotune.arbiters.math_arbiter
+        model: gpt-4o-mini
+      every_n_steps: 50
+      dataset:
+        _component_: ppotune.data.sets.hendrycks_math_dataset
+        split: test
+        subjects: ${dataset.subjects}
+      dataloader_config:
+        batch_size: 4
+        num_steps: 10
+      empty_cache_after_generation: True
+
+# PPO Optimization Batch Parameters
+ppo_epochs: 4
+ppo_batch_size: 20
+gradient_accumulation_steps: 1
+forward_batch_size: 4
+
+
+# --------------------------------- Policy ---------------------------------- #
+#
+policy:
+  _component_: ppotune.model.GenerativeLoRAModel
+  generation_batch_size: ${forward_batch_size}
+  max_response_len: 512
+  temperature: 0.7
+  top_k: null
+  model:
+    _component_: torchtune.models.mistral.lora_mistral_7b
+    lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+    apply_lora_to_mlp: True
+    apply_lora_to_output: False
+    lora_rank: 64
+    lora_alpha: 16
+    lora_dropout: 0.0
+    quantize_base: False
+  ckpt:
+    _component_: torchtune.training.FullModelHFCheckpointer
+    checkpoint_dir: ${prefix}/models/${model}/
+    checkpoint_files:
+      [
+        "model-00001-of-00003.safetensors",
+        "model-00002-of-00003.safetensors",
+        "model-00003-of-00003.safetensors",
+      ]
+    recipe_checkpoint: null
+    output_dir: ${output_dir}/policy
+    model_type: MISTRAL
+
+
+# ---------------------------- Advantage Model ------------------------------ #
+#
+advantage:
+  _component_: ppotune.advantage.GRAE
+  group_size: 4
+  reward:
+    _component_: ppotune.reward.DeepSeekMathRewardModel
+
+
+# ---------------------------- Reference Model ------------------------------ #
+#
+reference:
+  _component_: ppotune.comm.distributed_policy_mixture
+  update_every_n_steps: 20
+  protocol:
+    _component_: ppotune.comm.static_protocol
+    weightage:
+      _component_: ppotune.comm.uniform_weightage
+      self_preference: 0.8  # PRPO: 80% self, 20% from other 3 agents
+
+
+# --------------------------------- Other ----------------------------------- #
+#
+optimizer:
+  _component_: bitsandbytes.optim.PagedAdamW
+  lr: 1e-4
+
+dtype: bf16
+
+kl_penalty:
+  _component_: ppotune.loss.KLPenalty
+  coeff: 0.1
+
+epsilon: 0.2
+
+# Logging
+wandb_logger:
+  dir: ${prefix}
+  entity: RADFAN
+  project: ${project}
+  group: ${group}
+  name: ${model}-${run}
+  additional_info: ${dataset.subjects}

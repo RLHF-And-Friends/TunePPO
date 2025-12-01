@@ -1,0 +1,193 @@
+# Config for multi-device RLHF (Q)LoRA GRPO finetuning of Mistral 7B model for Personalized MATH task.
+# WITH PRPO COMMUNICATION (self_preference=0.8)
+#
+# This config uses the FULL Hendrycks MATH dataset (EleutherAI/hendrycks_math):
+#   - algebra: 1,744 train samples
+#   - geometry: 870 train samples
+#
+# This config assumes that you've run the following commands before launching this run:
+# 1. Download the policy model (Base)
+#   tune download mistral-community/Mistral-7B-v0.2 --output-dir ~/.tune/models/Mistral-7B-Base/
+#
+# You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
+# value models as well as WandBLogger logs are saved in sub-folders.
+#
+# To launch on 2 devices (2 subjects: algebra and geometry), run:
+#   tune run --nproc_per_node 2 receipts/ppo/ppo.py --config receipts/ppo/configs/pmath/mistral_7b_grpo_full_prpo.yaml
+#
+# To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
+# export OPENAI_API_KEY=<your API key>.
+# Use this variable even if you use deepinfra.
+#
+# NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
+# updated.
+
+
+prefix: ~/.tune
+
+project: PMATH
+group: Mistral-7B-Base-GRPO-Personalized-Full-PRPO
+model: Mistral-7B-Base
+run: GRPO-SP08
+
+output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
+
+seed: 0xD1CE
+
+# reduces training performance but helps a lot with CUDA OOMs and invalid
+# memory access errors in tight memoty setup
+empty_cache_after_generation: True
+
+# Notable relations for further reference
+#
+# (1) total_steps = dataloader.num_steps * dataloader.num_epochs
+# e.g for learning rate scheduling
+# (2) num_forward_steps = dataloader.batch_size / forward_batch_size * total_steps
+# e.g. for in-reward kl_coeff scheduling
+# (3) num_communcation_rounds = total_steps / reference.update_every_n_steps
+# e.g. for communication self preference scheduling
+
+
+# ---------------------------------- Data ----------------------------------- #
+#
+tokenizer:
+  _component_: ppotune.tokenizers.mistral2_tokenizer
+  path: ${prefix}/models/${model}/tokenizer.model
+  max_seq_len: 2500
+
+# Full Hendrycks MATH dataset (7,500 train total)
+# Using 2 subjects: algebra (1,744) and geometry (870)
+# Geometry is limiting factor: 870 samples
+# With batch_size=32, group_size=4, num_steps=20: 32*20=640 samples/epoch (fits in geometry)
+dataset:
+  _component_: ppotune.data.sets.plain_hendrycks_math_dataset
+  split: train
+  subjects:  # dist.rank -> list of subjects (2 agents, 2 subjects)
+    0: [algebra]
+    1: [geometry]
+
+dataloader:
+  _component_: ppotune.data.loaders.distributed_dataloader
+  batch_size: 32
+  group_size: 4  # GRPO group size
+  num_steps: 20  # 32*20=640 samples/epoch, fits in geometry (870)
+  num_epochs: 10
+
+evaluator:
+  _component_: ppotune.evaluation.evaluation_group
+  evaluators:
+    # global evaluation on MATH-500
+    - _component_: ppotune.evaluation.math_evaluator
+      tag: global
+      arbiter:
+        _component_: ppotune.arbiters.math_arbiter
+        model: gpt-4o-mini
+      every_n_steps: 50
+      dataset:
+        _component_: ppotune.data.sets.math500_dataset
+        split: test
+      dataloader_config:
+        batch_size: 4  # must match forward_batch_size
+        num_steps: 10
+      empty_cache_after_generation: True
+    # local evaluation (same subjects as training) using test split
+    - _component_: ppotune.evaluation.math_evaluator
+      tag: local
+      arbiter:
+        _component_: ppotune.arbiters.math_arbiter
+        model: gpt-4o-mini
+      every_n_steps: 20
+      dataset:
+        _component_: ppotune.data.sets.hendrycks_math_dataset
+        split: test
+        subjects: ${dataset.subjects}
+      dataloader_config:
+        batch_size: 4  # must match forward_batch_size
+        num_steps: 10
+      empty_cache_after_generation: True
+
+# PPO Optimization Batch Parameters
+ppo_epochs: 4
+ppo_batch_size: 32
+gradient_accumulation_steps: 1
+forward_batch_size: 4
+
+
+# --------------------------------- Policy ---------------------------------- #
+#
+policy:
+  _component_: ppotune.model.GenerativeLoRAModel
+  generation_batch_size: ${forward_batch_size}
+  max_response_len: 512  # Math solutions can be longer
+  temperature: 0.7
+  top_k: null
+  model:
+    _component_: torchtune.models.mistral.lora_mistral_7b
+    # (Q)LoRA
+    lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
+    apply_lora_to_mlp: True
+    apply_lora_to_output: False
+    lora_rank: 64  # higher increases accuracy and memory
+    lora_alpha: 16  # usually alpha=2*rank
+    lora_dropout: 0.0
+    quantize_base: False # stands for 'Q' in QLoRA
+  ckpt:
+    _component_: torchtune.training.FullModelHFCheckpointer
+    checkpoint_dir: ${prefix}/models/${model}/
+    checkpoint_files:
+      [
+        "model-00001-of-00003.safetensors",
+        "model-00002-of-00003.safetensors",
+        "model-00003-of-00003.safetensors",
+      ]
+    # this is the only place where you should update `recipe_checkpoint` if resuming training
+    recipe_checkpoint: null
+    output_dir: ${output_dir}/policy
+    model_type: MISTRAL
+
+
+# ---------------------------- Advantage Model ------------------------------ #
+#
+advantage:
+  _component_: ppotune.advantage.GRAE
+  group_size: 4
+  reward:
+    _component_: ppotune.reward.DeepSeekMathRewardModel
+
+
+# ---------------------------- Reference Model ------------------------------ #
+#
+reference:
+  _component_: ppotune.comm.distributed_policy_mixture
+  update_every_n_steps: 10
+  protocol:
+    _component_: ppotune.comm.static_protocol
+    weightage:
+      _component_: ppotune.comm.uniform_weightage
+      self_preference: 0.8  # PRPO: 80% self, 20% from other agent
+
+
+# --------------------------------- Other ----------------------------------- #
+#
+optimizer:
+  _component_: bitsandbytes.optim.PagedAdamW
+  lr: 1e-4
+
+dtype: bf16 # | fp32 | fp16 is not supported
+
+kl_penalty:
+  _component_: ppotune.loss.KLPenalty
+  coeff: 0.1
+
+# PPO Loss
+# clipping hyperparameter
+epsilon: 0.2
+
+# Logging
+wandb_logger:
+  dir: ${prefix}
+  entity: RADFAN
+  project: ${project}
+  group: ${group}
+  name: ${model}-${run}
+  additional_info: ${dataset.subjects}
