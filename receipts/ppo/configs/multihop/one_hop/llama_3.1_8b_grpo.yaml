@@ -26,9 +26,9 @@
 prefix: ~/.tune
 
 project: MULTIHOP
-group: Llama-3.1-8B-Base-PPO # Llama-3.1-8B-Instruct-GRPO
-model: Llama-3.1-8B-Base # Llama-3.1-8B-Instruct
-run: ppo-oneHop-withLLMSelector-filterDataset
+group: Llama-3.1-8B-Instruct-GRPO
+model: Llama-3.1-8B-Instruct
+run: grpo-math500-baseline
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
@@ -56,18 +56,18 @@ tokenizer:
   max_seq_len: 2500
 
 dataset:
-  _component_: ppotune.data.sets.one_hop_dataset
-  source: VavGreg/wikidata_b21_dataset
-  name: one_hop_clear
-  split: train
+  _component_: ppotune.data.sets.math500_dataset
+  source: HuggingFaceH4/MATH-500
+  name: default
+  split: test
   download_mode: force_redownload
 
 dataloader:
   _component_: ppotune.data.loaders.distributed_dataloader
   batch_size: 32
   group_size: 8
-  num_steps: 173
-  num_epochs: 1
+  num_steps: 50
+  num_epochs: 3
 
 evaluator:
   _component_: ppotune.evaluation.empty_evaluator
@@ -119,11 +119,11 @@ advantage:
   group_size: ${dataloader.group_size}
   reward:
     _component_: ppotune.reward.GraphMultihopQAReward
-    entity_aliases_filepath: ~/TunePPO/tuneppo/KG/wikidata5m_entity.txt
-    relation_aliases_filepath: ~/TunePPO/tuneppo/KG/wikidata5m_relation.txt
-    dataset_filepath: ~/TunePPO/tuneppo/KG/wikidata5m_transductive_train.txt
+    entity_aliases_filepath: ~/TunePPO/tuneppo/KG_mquake_filtered/wikidata5m_entity.txt
+    relation_aliases_filepath: ~/TunePPO/tuneppo/KG_mquake_filtered/wikidata5m_relation.txt
+    dataset_filepath: ~/TunePPO/tuneppo/KG_mquake_filtered/wikidata5m_transductive_train.txt
     triplets_prompt_filepath: ~/TunePPO/tuneppo/KG/generate_triplets_prompt.txt
-    entity_description_filepath: ~/TunePPO/tuneppo/KG/wikidata5m_text.txt
+    entity_description_filepath: ~/TunePPO/tuneppo/KG_mquake_filtered/wikidata5m_text.txt
     llm_selector_prompt_filepath: ~/TunePPO/tuneppo/KG/select_description_prompt.txt
     base_url: https://api.deepinfra.com/v1/openai
     triplets_model: Qwen/Qwen2.5-72B-Instruct

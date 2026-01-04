@@ -747,7 +747,7 @@ class GraphMultihopQAReward(IRewardModel):
         correct_answer_reward: float,
         answer_tag_reward: float,
         think_tag_reward: float,
-        similarity_penalty_reward: float,
+        similarity_penalty: float,
         reasoning_length_penalty_reward: float,
         answer_length_penalty_reward: float,
         format_penalty_reward: float,
@@ -758,12 +758,6 @@ class GraphMultihopQAReward(IRewardModel):
             correct_answer_reward
             + answer_tag_reward
             + think_tag_reward
-            - similarity_penalty_reward
-            - reasoning_length_penalty_reward
-            - answer_length_penalty_reward
-            - format_penalty_reward
-            - many_answer_tags_penalty_reward
-            - many_think_tags_penalty_reward
         )
 
     def named_parameters(
@@ -795,12 +789,11 @@ class GraphMultihopQAReward(IRewardModel):
         **kwargs,
     ) -> torch.Tensor:  # B
         queries_len = tokens.shape[1] - responses_pad_mask.shape[1]
-        response_tokens = tokens[:, queries_len:].clone()
-        response_tokens[responses_pad_mask] = self._tokenizer.pad_id
+        full_tokens = tokens.clone()
+        full_tokens[:, queries_len:][responses_pad_mask] = self._tokenizer.pad_id
 
         responses = [
-            self._tokenizer.decode(single_response_tokens.tolist(), skip_special_tokens=True)
-            for single_response_tokens in response_tokens
+            self._tokenizer.decode(t.tolist(), skip_special_tokens=True) for t in full_tokens
         ]
         final_answers = batch["final_answer"]
         paths = batch["path"]
@@ -916,27 +909,29 @@ class GraphMultihopQAReward(IRewardModel):
             correct_answer_reward = self.correct_answer_reward
             success = 1
 
-        ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
-        completion_graph = graph_creator(reasoning)
-        similarity = completion_graph.compare_to(ground_truth_graph)
-        ground_truth_graph_path = str(ground_truth_graph)
-        completion_graph_path = str(completion_graph)
+        # ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
+        # completion_graph = graph_creator(reasoning)
+        # similarity = completion_graph.compare_to(
+        #     ground_truth_graph, node_del_cost=0.0, edge_del_cost=0.0
+        # )
+        # ground_truth_graph_path = str(ground_truth_graph)
+        # completion_graph_path = str(completion_graph)
 
-        similarity_penalty_reward = (
-            similarity * self.similarity_reward
-        )  # это graph_edit_distance - сколько действий произвести, чтобы графы сошлись
-        similarity_penalty_reward = min(similarity_penalty_reward, self.ban_penalty)
-        format_penalty_reward = content_len * self.format_penalty_reward  # вне think/answer тегов
-        format_penalty_reward = min(format_penalty_reward, self.ban_penalty)
+        # similarity_penalty = (
+        #     similarity * self.similarity_reward
+        # )  # это graph_edit_distance - сколько действий произвести, чтобы графы сошлись
+        # similarity_penalty = min(similarity_penalty, self.ban_penalty)
+        # format_penalty_reward = content_len * self.format_penalty_reward  # вне think/answer тегов
+        # format_penalty_reward = min(format_penalty_reward, self.ban_penalty)
 
         reward = self.compute_reward(
             correct_answer_reward,
             answer_tag_reward,
             think_tag_reward,
-            similarity_penalty_reward,
+            0,
             reasoning_length_penalty_reward,
             answer_length_penalty_reward,
-            format_penalty_reward,
+            0,
             many_answer_tags_penalty_reward,
             many_think_tags_penalty_reward,
         )
@@ -952,15 +947,15 @@ class GraphMultihopQAReward(IRewardModel):
             completion=completion,
             reasoning=reasoning,
             answer=answer,
-            ground_truth_graph_path=ground_truth_graph_path,
-            completion_graph_path=completion_graph_path,
+            ground_truth_graph_path="",
+            completion_graph_path="",
             answer_tag_reward=answer_tag_reward,
             think_tag_reward=think_tag_reward,
             correct_answer_reward=correct_answer_reward,
-            similarity_penalty_reward=similarity_penalty_reward,
+            similarity_penalty_reward=0,
             reasoning_length_penalty_reward=reasoning_length_penalty_reward,
             answer_length_penalty_reward=answer_length_penalty_reward,
-            format_penalty_reward=format_penalty_reward,
+            format_penalty_reward=0,
             score=reward,
         )
 
@@ -969,7 +964,7 @@ class GraphMultihopQAReward(IRewardModel):
                 "answer_length": self.to_tensor(len(answer.split()), device),
                 "reasoning_length": self.to_tensor(len(reasoning.split()), device),
                 "content_length": self.to_tensor(content_len, device),
-                "similarity_penalty": self.to_tensor(similarity_penalty_reward, device),
+                "similarity_penalty": self.to_tensor(0, device),
                 "scaled_scores": self.to_tensor(scaled_reward, device),
             }
         )

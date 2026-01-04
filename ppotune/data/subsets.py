@@ -29,6 +29,7 @@ def distributed_subset(
     """
     Split dataset for each rank evenly.
     """
+    print(f"Distributed subset: {dist.get_world_size()} * {num_samples} <= {len(dataset)}")
     assert dist.get_world_size() * num_samples <= len(dataset)
 
     indices = torch.randperm(len(dataset), generator=generator)

@@ -47,7 +47,7 @@ MODIFIED_REASONING_SYSTEM_PROMPT = (
     "the Assistant solves it. Assistant's response consists of thinking and the answer. The "
     "thinking and answer are enclosed within <think></think> and "
     "<answer></answer> tags, respectively, i.e., <think>reasoning process</think>"
-    "<answer>answer here</answer>. You need reply only by one <answer>...</answer> section and one <think>...</think> section. "
+    "<answer>answer here</answer>. You need reply only by one <think>...</think> section and one <answer>...</answer> section. "
     "After first <answer>...</answer> section, you need to stop generating any text and return <|eot_id|> token. "
     "Answer section should be short and concise. Thinking section should be detailed and comprehensive.\n"
 )
@@ -197,6 +197,87 @@ class ThreeHopTransform(MultihopTransform):
             question=question, answers=answers, path=path, final_answer=final_answer
         )
 
+class MQuAKETransform(MultihopTransform):
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
+        question = sample["question"]
+        answers = sample["aliases"]
+        final_answer = sample["aliases"][-1]
+        path = sample["path"]
+
+        return MultiHopProblem(
+            question=question, answers=answers, path=path, final_answer=final_answer
+        )
+
+class Math500Problem(tp.TypedDict):
+    problem: str
+    answer: str
+
+class Math500Transform(Transform):
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> Math500Problem:
+        return Math500Problem(problem=sample["problem"], answer=sample["answer"])
+
+class Math500Dataset(Dataset):
+    def __init__(
+        self,
+        source: str,
+        sample_transform: Math500Transform,
+        filter_fn: tp.Optional[tp.Callable] = None,
+        system_prompt: tp.Optional[str] = None,
+        prompt_template: tp.Optional[str] = None,
+        **load_dataset_kwargs,
+    ) -> None:
+        self._data = load_dataset(path=source, **load_dataset_kwargs)
+        self._sample_transform = sample_transform
+        self._system_prompt = system_prompt
+        self._prompt_template = prompt_template
+
+        if filter_fn is not None:
+            self.data = self.data.filter(filter_fn)
+
+    def setup(self, tokenizer: ModelTokenizer):
+        self._tokenizer = tokenizer
+
+    def _tokenize_question(self, question: str) -> tp.List[int]:
+        """
+        Tokenize a question possibly adding a system_prompt.
+        """
+        messages = []
+        if self._system_prompt is not None:
+            messages.append(Message(role="system", content=self._system_prompt, eot=True))
+        messages.append(
+            Message(
+                role="user",
+                content=question,
+                eot=True,
+            )
+        )
+
+        tokens = []
+        if self._prompt_template is None:
+            tokens = self._tokenizer.tokenize_messages(
+                messages=messages, add_generation_prompt=True
+            )
+        else:
+            text = apply_prompt_template(
+                template=self._prompt_template, messages=messages, add_generation_prompt=True
+            )
+            tokens = self._tokenizer.encode(text, add_eos=False)
+            tokens = tokens[: self._tokenizer.max_seq_len]
+
+        return tokens
+
+    def __getitem__(self, index) -> tp.Dict[str, tp.Any]:
+        sample = self._sample_transform(self._data[index])
+        tokens = self._tokenize_question(sample["problem"])
+        return {
+            "tokens": tokens,
+            "final_answer": [sample["answer"]],
+            "path": "",
+        }
+
+    def __len__(self) -> int:
+        return len(self._data)
+
 
 one_hop_dataset = partial(
     MultiHopDataset,
@@ -217,6 +298,20 @@ three_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=ThreeHopTransform(),
     # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
+    system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
+    prompt_template=BASIC_PROMPT_TEMPLATE,
+)
+
+mquake_dataset = partial(
+    MultiHopDataset,
+    sample_transform=MQuAKETransform(),
+    system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
+    prompt_template=BASIC_PROMPT_TEMPLATE,
+)
+
+math500_dataset = partial(
+    Math500Dataset,
+    sample_transform=Math500Transform(),
     system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
     prompt_template=BASIC_PROMPT_TEMPLATE,
 )

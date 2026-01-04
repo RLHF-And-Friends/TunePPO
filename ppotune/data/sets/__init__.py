@@ -18,7 +18,13 @@ from ppotune.data.sets.gsm8k import (
     plain_gsm8k_dataset,
 )
 from ppotune.data.sets.helpsteer import helpsteer_dataset
-from ppotune.data.sets.multi_hop import three_hop_dataset, two_hop_dataset, one_hop_dataset
+from ppotune.data.sets.multi_hop import (
+    three_hop_dataset,
+    two_hop_dataset,
+    one_hop_dataset,
+    mquake_dataset,
+    math500_dataset,
+)
 from ppotune.data.sets.tldr import tldr_dataset
 from ppotune.data.sets.wiki_lingua import wiki_lingua_dataset
 
@@ -33,5 +39,7 @@ __all__ = [
     "wiki_lingua_dataset",
     "one_hop_dataset",
     "two_hop_dataset",
-    "three_hop_dataset"
+    "three_hop_dataset",
+    "mquake_dataset",
+    "math500_dataset",
 ]
