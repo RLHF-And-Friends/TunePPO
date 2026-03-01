@@ -275,9 +275,17 @@ class PPORecipe(FTRecipeInterface):
         )
 
         for i, completion in enumerate(generated.tokens):
+            fa = batch["final_answer"]
+            path = batch["path"]
+            fa_i = fa[i] if isinstance(fa, (list, tuple)) else fa
+            path_i = path[i] if isinstance(path, (list, tuple)) else path
             disk_logger.collect_completion(
-                self._tokenizer.decode(completion[tokens_mask[i]].tolist(), skip_special_tokens=False), 
-                float(advantage_trajectory.scores[i].cpu().numpy()[0]), batch["final_answer"], batch["path"][0]
+                self._tokenizer.decode(
+                    completion[tokens_mask[i]].tolist(), skip_special_tokens=False
+                ),
+                float(advantage_trajectory.scores[i].cpu().numpy()[0]),
+                fa_i,
+                path_i,
             )
         return PPOTrajectoryStats(
             query_responses     = generated.tokens,

@@ -48,6 +48,7 @@ class WandbLogger(MetricLoggerInterface):
                 "completion",
                 "reasoning",
                 "answer",
+                "ground_truth_answer",
                 "ground_truth_graph_path",
                 "completion_graph_path",
                 "answer_tag_reward",
@@ -59,7 +60,7 @@ class WandbLogger(MetricLoggerInterface):
                 "format_penalty_reward",
                 "score"
             ],
-            dtype=[str, str, str, str, str, str, float, float, float, float, float, float, float, float]
+            dtype=[str, str, str, str, str, str, str, float, float, float, float, float, float, float, float]
         )
         self._table_reference: tp.Dict[str, wandb.Table] = {}
 
@@ -115,6 +116,7 @@ class WandbLogger(MetricLoggerInterface):
         completion: str,
         reasoning: str,
         answer: str,
+        ground_truth_answer: str,
         ground_truth_graph_path: str,
         completion_graph_path: str,
         answer_tag_reward: float,
@@ -134,6 +136,7 @@ class WandbLogger(MetricLoggerInterface):
             completion,
             reasoning,
             answer,
+            ground_truth_answer,
             ground_truth_graph_path,
             completion_graph_path,
             answer_tag_reward,
@@ -182,6 +185,7 @@ class WandbLogger(MetricLoggerInterface):
                     "completion",
                     "reasoning",
                     "answer",
+                    "ground_truth_answer",
                     "ground_truth_graph_path",
                     "completion_graph_path",
                     "answer_tag_reward",
@@ -193,7 +197,7 @@ class WandbLogger(MetricLoggerInterface):
                     "format_penalty_reward",
                     "score"
                 ],
-                dtype=[str, str, str, str, str, str, float, float, float, float, float, float, float, float]
+                dtype=[str, str, str, str, str, str, str, float, float, float, float, float, float, float, float]
             )
 
 

@@ -9,6 +9,36 @@ from torchtune.modules.transforms import Transform
 
 from ppotune.data.utils import PrefixSuffix, PromptTemplate, apply_prompt_template
 
+
+def _to_python_list(obj: tp.Any) -> list[tp.Any]:
+    """Convert HuggingFace Arrow types to plain Python list."""
+    if obj is None:
+        return []
+    if hasattr(obj, "as_py"):
+        return _to_python_list(obj.as_py())
+    if isinstance(obj, list):
+        return [_to_python_item(x) for x in obj]
+    if isinstance(obj, str):
+        import json
+
+        try:
+            return _to_python_list(json.loads(obj))
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _to_python_item(item: tp.Any) -> tp.Any:
+    """Convert single item (dict/Arrow struct) to plain Python."""
+    if hasattr(item, "as_py"):
+        return _to_python_item(item.as_py())
+    if isinstance(item, dict):
+        return {k: _to_python_item(v) for k, v in item.items()}
+    if isinstance(item, list):
+        return [_to_python_item(x) for x in item]
+    return item
+
+
 # -------------------------------------------------------------------------------------------------
 # System prompt with specific question-answer format
 # -------------------------------------------------------------------------------------------------
@@ -52,6 +82,15 @@ MODIFIED_REASONING_SYSTEM_PROMPT = (
     "Answer section should be short and concise. Thinking section should be detailed and comprehensive.\n"
 )
 
+RULETAKER_SYSTEM_PROMPT = (
+    "A conversation between User and Assistant. The user provides a Context and a Question. "
+    "Determine whether the Question follows from the Context (entailment) or not (not entailment). "
+    "Assistant's response consists of thinking and the answer. The thinking and answer are enclosed "
+    "within <think></think> and <answer></answer> tags. You must reply with exactly one <think>...</think> "
+    "section and one <answer>...</answer> section. The text in answer section must be ONLY one of: entailment or not entailment. "
+    "After the <answer>...</answer> section, stop and return <|eot_id|> token.\n"
+)
+
 REASONING_SYSTEM_PROMPT_V2 = """
 A conversation between User and Assistant. The user asks a question, and the Assistant solves it using structured thinking.
 Format your response as:
@@ -86,7 +125,7 @@ BASIC_PROMPT_TEMPLATE: PromptTemplate = {
 class MultiHopProblem(tp.TypedDict):
     question: str
     answers: tp.List[str]
-    path: str
+    path: tp.Union[str, tp.List[tp.Any]]
     final_answer: tp.List[str]
 
 
@@ -99,10 +138,10 @@ class MultiHopDataset(Dataset):
         self,
         source: str,
         sample_transform: MultihopTransform,
-        filter_fn: tp.Optional[tp.Callable] = None,
+        filter_fn: tp.Optional[tp.Callable[..., tp.Any]] = None,
         system_prompt: tp.Optional[str] = None,
-        prompt_template: tp.Optional[str] = None,
-        **load_dataset_kwargs,
+        prompt_template: tp.Optional[tp.Union[str, PromptTemplate]] = None,
+        **load_dataset_kwargs: tp.Any,
     ) -> None:
         self._data = load_dataset(path=source, **load_dataset_kwargs)
         self._sample_transform = sample_transform
@@ -110,15 +149,12 @@ class MultiHopDataset(Dataset):
         self._prompt_template = prompt_template
 
         if filter_fn is not None:
-            self.data = self.data.filter(filter_fn)
+            self._data = self._data.filter(filter_fn)
 
-    def setup(self, tokenizer: ModelTokenizer):
+    def setup(self, tokenizer: ModelTokenizer) -> None:
         self._tokenizer = tokenizer
 
     def _tokenize_question(self, question: str) -> tp.List[int]:
-        """
-        Tokenize a question possibly adding a system_prompt.
-        """
         messages = []
         if self._system_prompt is not None:
             messages.append(Message(role="system", content=self._system_prompt, eot=True))
@@ -130,21 +166,23 @@ class MultiHopDataset(Dataset):
             )
         )
 
-        tokens = []
         if self._prompt_template is None:
-            tokens = self._tokenizer.tokenize_messages(
-                messages=messages, add_generation_prompt=True
+            out = self._tokenizer.tokenize_messages(
+                messages=messages, add_generation_prompt=True  # type: ignore[arg-type]
             )
+            tokens: tp.List[int] = out[0] if isinstance(out, tuple) else out
         else:
             text = apply_prompt_template(
-                template=self._prompt_template, messages=messages, add_generation_prompt=True
+                template=tp.cast(PromptTemplate, self._prompt_template),
+                messages=messages,
+                add_generation_prompt=True,
             )
-            tokens = self._tokenizer.encode(text, add_eos=False)
-            tokens = tokens[: self._tokenizer.max_seq_len]
+            tokens = list(self._tokenizer.encode(text, add_eos=False))  # type: ignore[attr-defined]
+            tokens = list(tokens[: self._tokenizer.max_seq_len])
 
         return tokens
 
-    def __getitem__(self, index) -> tp.Dict[str, tp.Any]:
+    def __getitem__(self, index: int) -> dict[str, tp.Any]:
         sample = self._sample_transform(self._data[index])
         tokens = self._tokenize_question(sample["question"])
         return {
@@ -152,6 +190,7 @@ class MultiHopDataset(Dataset):
             "answers": sample["answers"],
             "path": sample["path"],
             "final_answer": sample["final_answer"],
+            "question": sample["question"],
         }
 
     def __len__(self) -> int:
@@ -208,6 +247,34 @@ class MQuAKETransform(MultihopTransform):
             question=question, answers=answers, path=path, final_answer=final_answer
         )
 
+
+class RuletakerTransform(MultihopTransform):
+    """
+    Transform for ruletaker format (context, question, path, label).
+    Path: list of {fact: {rel, src, tgt}}.
+    """
+
+    def __call__(self, sample: tp.Mapping[str, tp.Any]) -> MultiHopProblem:
+        question = sample.get("question", "")
+        context = sample.get("context", "")
+        if context and question:
+            question = f"Context: {context}\n\nQuestion: {question}"
+        elif context:
+            question = context
+        raw_path = sample.get("path", sample.get("graph", []))
+        path = _to_python_list(raw_path) if raw_path else []
+
+        label = sample.get("label", "")
+        if isinstance(label, str):
+            final_answer: tp.List[str] = [label] if label else []
+        else:
+            final_answer = list(label) if label else []
+        answers: tp.List[str] = []
+
+        return MultiHopProblem(
+            question=question, answers=answers, path=path, final_answer=final_answer
+        )
+
 class Math500Problem(tp.TypedDict):
     problem: str
     answer: str
@@ -221,10 +288,10 @@ class Math500Dataset(Dataset):
         self,
         source: str,
         sample_transform: Math500Transform,
-        filter_fn: tp.Optional[tp.Callable] = None,
+        filter_fn: tp.Optional[tp.Callable[..., tp.Any]] = None,
         system_prompt: tp.Optional[str] = None,
-        prompt_template: tp.Optional[str] = None,
-        **load_dataset_kwargs,
+        prompt_template: tp.Optional[tp.Union[str, PromptTemplate]] = None,
+        **load_dataset_kwargs: tp.Any,
     ) -> None:
         self._data = load_dataset(path=source, **load_dataset_kwargs)
         self._sample_transform = sample_transform
@@ -232,15 +299,12 @@ class Math500Dataset(Dataset):
         self._prompt_template = prompt_template
 
         if filter_fn is not None:
-            self.data = self.data.filter(filter_fn)
+            self._data = self._data.filter(filter_fn)
 
-    def setup(self, tokenizer: ModelTokenizer):
+    def setup(self, tokenizer: ModelTokenizer) -> None:
         self._tokenizer = tokenizer
 
     def _tokenize_question(self, question: str) -> tp.List[int]:
-        """
-        Tokenize a question possibly adding a system_prompt.
-        """
         messages = []
         if self._system_prompt is not None:
             messages.append(Message(role="system", content=self._system_prompt, eot=True))
@@ -252,21 +316,23 @@ class Math500Dataset(Dataset):
             )
         )
 
-        tokens = []
         if self._prompt_template is None:
-            tokens = self._tokenizer.tokenize_messages(
-                messages=messages, add_generation_prompt=True
+            out = self._tokenizer.tokenize_messages(
+                messages=messages, add_generation_prompt=True  # type: ignore[arg-type]
             )
+            tokens = out[0] if isinstance(out, tuple) else out
         else:
             text = apply_prompt_template(
-                template=self._prompt_template, messages=messages, add_generation_prompt=True
+                template=tp.cast(PromptTemplate, self._prompt_template),
+                messages=messages,
+                add_generation_prompt=True,
             )
-            tokens = self._tokenizer.encode(text, add_eos=False)
-            tokens = tokens[: self._tokenizer.max_seq_len]
+            tokens = list(self._tokenizer.encode(text, add_eos=False))  # type: ignore[attr-defined]
+            tokens = list(tokens[: self._tokenizer.max_seq_len])
 
         return tokens
 
-    def __getitem__(self, index) -> tp.Dict[str, tp.Any]:
+    def __getitem__(self, index: int) -> tp.Dict[str, tp.Any]:
         sample = self._sample_transform(self._data[index])
         tokens = self._tokenize_question(sample["problem"])
         return {
@@ -290,9 +356,8 @@ one_hop_dataset = partial(
 two_hop_dataset = partial(
     MultiHopDataset,
     sample_transform=TwoHopTransform(),
-    # system_prompt=BASIC_REASONING_SYSTEM_PROMPT,
     system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
-    prompt_tamplate=BASIC_PROMPT_TEMPLATE,
+    prompt_template=BASIC_PROMPT_TEMPLATE,
 )
 three_hop_dataset = partial(
     MultiHopDataset,
@@ -306,6 +371,13 @@ mquake_dataset = partial(
     MultiHopDataset,
     sample_transform=MQuAKETransform(),
     system_prompt=MODIFIED_REASONING_SYSTEM_PROMPT,
+    prompt_template=BASIC_PROMPT_TEMPLATE,
+)
+
+rultaker_dataset = partial(
+    MultiHopDataset,
+    sample_transform=RuletakerTransform(),
+    system_prompt=RULETAKER_SYSTEM_PROMPT,
     prompt_template=BASIC_PROMPT_TEMPLATE,
 )
 

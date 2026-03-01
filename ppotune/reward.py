@@ -1,4 +1,6 @@
 from functools import partial
+import json
+import logging
 import os
 import typing as tp
 
@@ -26,7 +28,10 @@ from smart_thinking_llm.tools.graph_creator.base import GraphCreatorBase
 from smart_thinking_llm.tools.graph_creator.graph_creator_with_llm_selector import (
     GraphCreatorWithLLMSelector,
 )
+from smart_thinking_llm.tools.graph import Graph
+from smart_thinking_llm.utils import make_openai_request
 
+import networkx as nx
 import torch
 from torch.nn import Parameter
 
@@ -645,6 +650,228 @@ class LLMBasedMultiHopQAShapedReward(IRewardModel):
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+RULETAKER_TRIPLET_PROMPT = """Extract all subject-relation-object triplets from the text. Use short entity names (e.g. "cat", "cow"). Return ONLY a Python list of tuples: [("src", "rel", "tgt"), ...].
+
+Text:
+{text}
+
+List of triplets:"""
+
+
+class RuletakerPathGraph:
+    """
+    Lightweight graph from ruletaker path format: list of {fact: {rel, src, tgt}}.
+    Uses string labels for nodes/edges, comparable via graph edit distance.
+    """
+
+    def __init__(self, path_data: list[dict[str, tp.Any]]) -> None:
+        self.graph = nx.DiGraph()
+        for item in path_data:
+            fact = item.get("fact") or item
+            if not isinstance(fact, dict):
+                continue
+            rel = fact.get("rel", "")
+            src = str(fact.get("src", "")).lower()
+            tgt = str(fact.get("tgt", "")).lower()
+            if not rel or not src or not tgt:
+                continue
+            if fact.get("negated"):
+                rel = "negated " + rel
+            self.graph.add_node(src, label=src)
+            self.graph.add_node(tgt, label=tgt)
+            self.graph.add_edge(src, tgt, label=rel)
+
+    def compare_to(
+        self,
+        other: "RuletakerPathGraph",
+        node_del_cost: float = 1.0,
+        node_ins_cost: float = 1.0,
+        edge_del_cost: float = 1.0,
+        edge_ins_cost: float = 1.0,
+    ) -> float:
+        def node_match(n1: dict, n2: dict) -> bool:
+            return n1.get("label") == n2.get("label")
+
+        def edge_match(e1: dict, e2: dict) -> bool:
+            return e1.get("label") == e2.get("label")
+
+        node_del = lambda _: node_del_cost
+        node_ins = lambda _: node_ins_cost
+        edge_del = lambda _: edge_del_cost
+        edge_ins = lambda _: edge_ins_cost
+
+        return float(
+            nx.graph_edit_distance(
+                self.graph,
+                other.graph,
+                node_match=node_match,
+                edge_match=edge_match,
+                node_del_cost=node_del,
+                node_ins_cost=node_ins,
+                edge_del_cost=edge_del,
+                edge_ins_cost=edge_ins,
+            )
+            or 0.0
+        )
+
+    def __str__(self) -> str:
+        if self.graph.number_of_nodes() == 0:
+            return "RuletakerPathGraph(empty)"
+        lines = []
+        for u, v, d in self.graph.edges(data=True):
+            lines.append(f"{u} --[{d.get('label', '')}]--> {v}")
+        return "\n".join(lines) if lines else "RuletakerPathGraph(empty)"
+
+
+class ReasoningGraphMatcher:
+    """
+    Extracts subgraph from model reasoning and compares it with ground truth path.
+    Supports: Wikidata "Q1-P1-Q2", B21 "Q1 -> P1 -> Q2", ruletaker [{"fact": {rel, src, tgt}}].
+    """
+
+    @staticmethod
+    def is_ruletaker_path(path: tp.Any) -> bool:
+        if path is None:
+            return False
+        if isinstance(path, str):
+            try:
+                path = json.loads(path)
+            except json.JSONDecodeError:
+                return False
+        try:
+            if not hasattr(path, "__len__") or len(path) == 0:
+                return False
+            first = path[0]
+            if hasattr(first, "as_py"):
+                first = first.as_py()
+            if isinstance(first, dict):
+                return "fact" in first or "rel" in first
+            return False
+        except (TypeError, IndexError, KeyError, AttributeError, ValueError):
+            return False
+
+    @staticmethod
+    def normalize_path(path: str) -> str:
+        """Convert B21 ' -> ' format to hyphen format for get_graph_from_path."""
+        if not path or not path.strip():
+            return path
+        return re.sub(r"\s*->\s*", "-", path.strip())
+
+    @staticmethod
+    def extract_graph_from_reasoning(
+        graph_creator: GraphCreatorBase, reasoning: str
+    ) -> Graph | None:
+        """Extract graph from reasoning text via LLM triplet extraction."""
+        if not reasoning or not reasoning.strip():
+            return None
+        try:
+            return graph_creator(reasoning)
+        except Exception:
+            return None
+
+    @staticmethod
+    def get_graph_from_path(
+        graph_creator: GraphCreatorBase, path: str
+    ) -> Graph | None:
+        """Build graph from path string (supports B21 and hyphen formats)."""
+        if not path or not path.strip():
+            return None
+        normalized = ReasoningGraphMatcher.normalize_path(path)
+        try:
+            return graph_creator.get_graph_from_path(normalized)
+        except (KeyError, ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _to_python_obj(obj: tp.Any) -> tp.Any:
+        """Convert Arrow types to plain Python (HuggingFace datasets)."""
+        if hasattr(obj, "as_py"):
+            return ReasoningGraphMatcher._to_python_obj(obj.as_py())
+        if isinstance(obj, dict):
+            return {k: ReasoningGraphMatcher._to_python_obj(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [ReasoningGraphMatcher._to_python_obj(x) for x in obj]
+        return obj
+
+    @staticmethod
+    def normalize_path_for_ruletaker(path: tp.Any) -> list[tp.Any] | None:
+        """Convert path to plain Python list of dicts (handles HuggingFace Arrow)."""
+        if path is None:
+            return None
+        if isinstance(path, str):
+            try:
+                path = json.loads(path)
+            except json.JSONDecodeError:
+                return None
+        try:
+            path = ReasoningGraphMatcher._to_python_obj(path)
+            if not isinstance(path, list):
+                return None
+            return path if path else None
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def get_ruletaker_graph_from_path(path: tp.Any) -> RuletakerPathGraph | None:
+        """Build RuletakerPathGraph from path list or JSON string."""
+        normalized = ReasoningGraphMatcher.normalize_path_for_ruletaker(path)
+        if not normalized:
+            return None
+        try:
+            return RuletakerPathGraph(normalized)
+        except Exception:
+            return None
+
+    @staticmethod
+    def extract_ruletaker_graph_from_reasoning(
+        reasoning: str,
+        openai_client: tp.Any,
+        model: str,
+    ) -> RuletakerPathGraph | None:
+        """Extract triplets from reasoning via LLM, build RuletakerPathGraph."""
+        if not reasoning or not reasoning.strip():
+            return None
+        prompt = RULETAKER_TRIPLET_PROMPT.format(text=reasoning)
+        try:
+            response = make_openai_request(
+                openai_client, model, prompt, logging.getLogger(__name__)
+            )
+            triplets = ast.literal_eval(response.strip())
+            if not isinstance(triplets, list):
+                return None
+            path_data = []
+            for tup in triplets:
+                if isinstance(tup, (list, tuple)) and len(tup) >= 3:
+                    s = str(tup[0]).lower()
+                    r_raw = str(tup[1]).strip().lower()
+                    t = str(tup[2]).lower()
+                    if r_raw in ("is not", "not") or r_raw.startswith("is not "):
+                        rel, negated = "is", True
+                    else:
+                        rel = r_raw.replace("not ", "").strip() or r_raw
+                        negated = False
+                    path_data.append({"fact": {"src": s, "rel": rel, "tgt": t, "negated": negated}})
+            if not path_data:
+                return None
+            return RuletakerPathGraph(path_data)
+        except (ValueError, SyntaxError, IndexError, TypeError):
+            return None
+
+    @staticmethod
+    def compare_graphs(
+        completion_graph: Graph,
+        ground_truth_graph: Graph,
+        node_del_cost: float = 0.0,
+        edge_del_cost: float = 0.0,
+    ) -> float:
+        """Return graph edit distance (lower = more similar)."""
+        return completion_graph.compare_to(
+            ground_truth_graph,
+            node_del_cost=node_del_cost,
+            edge_del_cost=edge_del_cost,
+        )
+
+
 class GraphMultihopQAReward(IRewardModel):
     def __init__(
         self,
@@ -758,6 +985,12 @@ class GraphMultihopQAReward(IRewardModel):
             correct_answer_reward
             + answer_tag_reward
             + think_tag_reward
+            - similarity_penalty
+            - reasoning_length_penalty_reward
+            - answer_length_penalty_reward
+            - format_penalty_reward
+            - many_answer_tags_penalty_reward
+            - many_think_tags_penalty_reward
         )
 
     def named_parameters(
@@ -797,6 +1030,9 @@ class GraphMultihopQAReward(IRewardModel):
         ]
         final_answers = batch["final_answer"]
         paths = batch["path"]
+        questions = batch.get("question", [None] * len(responses))
+        if not isinstance(questions, (list, tuple)):
+            questions = [questions] * len(responses)
 
         with ThreadPoolExecutor() as executor:
             scores, successes = zip(
@@ -804,6 +1040,7 @@ class GraphMultihopQAReward(IRewardModel):
                     partial(self.shaped_correctness_reward, self._graph_creator, tokens.device),
                     final_answers,
                     paths,
+                    questions,
                     responses,
                 )
             )
@@ -824,8 +1061,9 @@ class GraphMultihopQAReward(IRewardModel):
         self,
         graph_creator: GraphCreatorBase,
         device: torch.device,
-        final_answer: str,
-        ground_truth_path: str,
+        final_answer: str | list[str],
+        ground_truth_path: str | list[tp.Any],
+        question_from_batch: str | None,
         completion: str,
     ) -> tuple[float, float]:
         """
@@ -848,9 +1086,15 @@ class GraphMultihopQAReward(IRewardModel):
         success = 0.0
 
         try:
-            tags, content_len, question = self.extract_tags_and_content_length(completion)
+            tags, content_len, parsed_question = self.extract_tags_and_content_length(
+                completion
+            )
         except ElementTree.ParseError:
             return reward, success
+
+        question = (
+            question_from_batch if question_from_batch is not None else parsed_question
+        )
 
         if len(tags["think"]) > 0:
             reasoning = tags["think"][0]
@@ -905,33 +1149,75 @@ class GraphMultihopQAReward(IRewardModel):
 
         correct_answer_reward = 0.0
         success = 0
-        if len(tags["answer"]) == 1 and tags["answer"][0] in final_answer:
+        fa_list = (
+            list(final_answer)
+            if isinstance(final_answer, (list, tuple))
+            else [final_answer]
+        )
+        fa_normalized = [str(x).strip().lower() for x in fa_list]
+        if len(tags["answer"]) == 1 and tags["answer"][0].strip().lower() in fa_normalized:
             correct_answer_reward = self.correct_answer_reward
             success = 1
 
-        # ground_truth_graph = graph_creator.get_graph_from_path(ground_truth_path)
-        # completion_graph = graph_creator(reasoning)
-        # similarity = completion_graph.compare_to(
-        #     ground_truth_graph, node_del_cost=0.0, edge_del_cost=0.0
-        # )
-        # ground_truth_graph_path = str(ground_truth_graph)
-        # completion_graph_path = str(completion_graph)
+        similarity_penalty = 0.0
+        ground_truth_graph_path = ""
+        completion_graph_path = ""
+        path_valid = (
+            ground_truth_path is not None
+            and (
+                (isinstance(ground_truth_path, str) and ground_truth_path.strip())
+                or (isinstance(ground_truth_path, list) and len(ground_truth_path) > 0)
+            )
+        )
+        if path_valid and ReasoningGraphMatcher.is_ruletaker_path(ground_truth_path):
+            gt_graph = ReasoningGraphMatcher.get_ruletaker_graph_from_path(
+                ground_truth_path
+            )
+            comp_graph = ReasoningGraphMatcher.extract_ruletaker_graph_from_reasoning(
+                reasoning,
+                graph_creator.openai_client,
+                self.triplets_model,
+            )
+            if gt_graph is not None:
+                ground_truth_graph_path = str(gt_graph)
+            if comp_graph is not None:
+                completion_graph_path = str(comp_graph)
+            if gt_graph is not None and comp_graph is not None:
+                similarity = comp_graph.compare_to(
+                    gt_graph, node_del_cost=0.0, edge_del_cost=0.0
+                )
+                similarity_penalty = similarity * self.similarity_reward
+                similarity_penalty = min(similarity_penalty, self.ban_penalty)
+        elif path_valid and isinstance(ground_truth_path, str):
+            ground_truth_graph = ReasoningGraphMatcher.get_graph_from_path(
+                graph_creator, ground_truth_path
+            )
+            completion_graph = ReasoningGraphMatcher.extract_graph_from_reasoning(
+                graph_creator, reasoning
+            )
+            if ground_truth_graph is not None and completion_graph is not None:
+                similarity = ReasoningGraphMatcher.compare_graphs(
+                    completion_graph,
+                    ground_truth_graph,
+                    node_del_cost=0.0,
+                    edge_del_cost=0.0,
+                )
+                similarity_penalty = similarity * self.similarity_reward
+                similarity_penalty = min(similarity_penalty, self.ban_penalty)
+                ground_truth_graph_path = str(ground_truth_graph)
+                completion_graph_path = str(completion_graph)
 
-        # similarity_penalty = (
-        #     similarity * self.similarity_reward
-        # )  # это graph_edit_distance - сколько действий произвести, чтобы графы сошлись
-        # similarity_penalty = min(similarity_penalty, self.ban_penalty)
-        # format_penalty_reward = content_len * self.format_penalty_reward  # вне think/answer тегов
-        # format_penalty_reward = min(format_penalty_reward, self.ban_penalty)
+        format_penalty_val = content_len * self.format_penalty_reward
+        format_penalty_val = min(format_penalty_val, self.ban_penalty)
 
         reward = self.compute_reward(
             correct_answer_reward,
             answer_tag_reward,
             think_tag_reward,
-            0,
+            similarity_penalty,
             reasoning_length_penalty_reward,
             answer_length_penalty_reward,
-            0,
+            format_penalty_val,
             many_answer_tags_penalty_reward,
             many_think_tags_penalty_reward,
         )
@@ -942,20 +1228,25 @@ class GraphMultihopQAReward(IRewardModel):
         else:
             scaled_reward = 0.0
 
+        ground_truth_answer = (
+            final_answer[0] if isinstance(final_answer, (list, tuple)) else final_answer
+        )
+
         logger.collect_completion_with_graph(
             question=question,
             completion=completion,
             reasoning=reasoning,
             answer=answer,
-            ground_truth_graph_path="",
-            completion_graph_path="",
+            ground_truth_answer=ground_truth_answer,
+            ground_truth_graph_path=ground_truth_graph_path,
+            completion_graph_path=completion_graph_path,
             answer_tag_reward=answer_tag_reward,
             think_tag_reward=think_tag_reward,
             correct_answer_reward=correct_answer_reward,
-            similarity_penalty_reward=0,
+            similarity_penalty_reward=similarity_penalty,
             reasoning_length_penalty_reward=reasoning_length_penalty_reward,
             answer_length_penalty_reward=answer_length_penalty_reward,
-            format_penalty_reward=0,
+            format_penalty_reward=format_penalty_val,
             score=reward,
         )
 
@@ -964,7 +1255,7 @@ class GraphMultihopQAReward(IRewardModel):
                 "answer_length": self.to_tensor(len(answer.split()), device),
                 "reasoning_length": self.to_tensor(len(reasoning.split()), device),
                 "content_length": self.to_tensor(content_len, device),
-                "similarity_penalty": self.to_tensor(0, device),
+                "similarity_penalty": self.to_tensor(similarity_penalty, device),
                 "scaled_scores": self.to_tensor(scaled_reward, device),
             }
         )
@@ -972,7 +1263,9 @@ class GraphMultihopQAReward(IRewardModel):
         return reward, success
 
     @staticmethod
-    def extract_tags_and_content_length(text: str) -> tuple[str, int, str]:
+    def extract_tags_and_content_length(
+        text: str,
+    ) -> tuple[dict[str, list[str]], int, str]:
         """
         Parse XML-like tags from text using regex. Returns a dictionary with keys 'think' and 'answer'.
         The values are lists of strings, with each string being the content of a tag.

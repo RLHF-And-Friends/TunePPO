@@ -1,51 +1,22 @@
-# Config for single device RLHF (Q)LoRA PPO finetuning of Llama3.1-8B model for Multihop QA task.
+# Config based on llama_3.1_8b_grpo.yaml for ruletaker_dev dataset.
+# Uses rultaker_dataset (RuletakerTransform) + GraphMultihopQAReward with graph comparison.
 #
-# This config uses hyperparameters based on small set of experiments and information
-# available from existing implementations.
+# To launch: tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/multihop/one_hop/llama_3.1_8b_ruletaker_dev.yaml
 #
-# This config assumes that you've run the following commands before launching
-# this run: (take a look what prefix is down the config)
-# Download the policy model
-#   a. (Base) tune download meta-llama/Llama-3.1-8B --output-dir ~/.tune/models/Llama-3.1-8B-Base/ --ignore-patterns "original/consolidated.00.pth"
-#   b. (Istruct) tune download meta-llama/Llama-3.1-8B-Instruct --output-dir ~/.tune/models/Llama-3.1-8B-Instruct/ --ignore-patterns "original/consolidated.00.pth"
-#
-# You'll also need to ensure that {output_dir} exists beforehand, as checkpoints for policy and
-# value models as well as WandBLogger logs are saved in sub-folders.
-#
-# To launch on N devices (starting from 1), run the following command from repo root:
-#   tune run --nproc_per_node N receipts/ppo/ppo.py --config receipts/ppo/configs/multihop/three_hop/llama_3.1_8b_grpo.yaml
-#
-# To use arbiters from 'OpenAI' or 'deepinfra' set the environment variable in advance:
-# export OPENAI_API_KEY=<your API key>.
-# Use this variable even if you use deepinfra.
-#
-# NOTE: Do not override from CLI variables other variables depend on. The dependants would not be
-# updated.
-
+# export OPENAI_API_KEY=<your API key>
 
 prefix: ~/.tune
 
 project: MULTIHOP
 group: Llama-3.1-8B-Instruct-GRPO
 model: Llama-3.1-8B-Instruct
-run: grpo-math500-baseline
+run: ruletaker-dev-graph-reward
 
 output_dir: ${prefix}/checkpoints/${project}/${group}/${model}-${run}
 
 seed: 0xD1CE
 
-# reduces training performance but helps a lot with CUDA OOMs and invalid
-# memory access errors in tight memoty setup
 empty_cache_after_generation: True
-
-# Notable relations for further reference
-#
-# (1) total_steps = dataloader.num_steps * dataloader.num_epochs
-# e.g for learning rate scheduling
-# (2) num_forward_steps = dataloader.batch_size / forward_batch_size * total_steps
-# e.g. for in-reward kl_coeff scheduling
-# (3) num_communcation_rounds = total_steps / reference.update_every_n_steps
-# e.g. for communication self preference scheduling
 
 # ---------------------------------- Data ----------------------------------- #
 
@@ -56,11 +27,11 @@ tokenizer:
   max_seq_len: 2500
 
 dataset:
-  _component_: ppotune.data.sets.math500_dataset
-  source: HuggingFaceH4/MATH-500
-  name: default
-  split: test
-  download_mode: force_redownload
+  _component_: ppotune.data.sets.rultaker_dataset
+  source: VavGreg/wikidata_b21_dataset
+  name: ruletaker_dev
+  split: train
+  token: true
 
 dataloader:
   _component_: ppotune.data.loaders.distributed_dataloader
@@ -78,9 +49,8 @@ ppo_batch_size: 32
 gradient_accumulation_steps: 4
 forward_batch_size: 8
 
-
 # --------------------------------- Policy ---------------------------------- #
-#
+
 policy:
   _component_: ppotune.model.GenerativeLoRAModel
   generation_batch_size: ${forward_batch_size}
@@ -89,14 +59,13 @@ policy:
   top_k: null
   model:
     _component_: torchtune.models.llama3_1.lora_llama3_1_8b
-    # (Q)LoRA
     lora_attn_modules: ['q_proj', 'k_proj', 'v_proj', 'output_proj']
     apply_lora_to_mlp: True
     apply_lora_to_output: False
-    lora_rank: 64  # higher increases accuracy and memory
-    lora_alpha: 16  # usually alpha=2*rank
+    lora_rank: 64
+    lora_alpha: 16
     lora_dropout: 0.0
-    quantize_base: False # stands for 'Q' in QLoRA
+    quantize_base: False
   ckpt:
     _component_: torchtune.training.FullModelHFCheckpointer
     checkpoint_dir: ${prefix}/models/${model}/
@@ -107,13 +76,12 @@ policy:
         "model-00003-of-00004.safetensors",
         "model-00004-of-00004.safetensors"
       ]
-    # this is the only place where you should update `recipe_checkpoint` if resuming training
     recipe_checkpoint: null
     output_dir: ${output_dir}/policy
     model_type: LLAMA3
 
 # ---------------------------- Advantage Model ------------------------------ #
-#
+
 advantage:
   _component_: ppotune.advantage.GRAE
   group_size: ${dataloader.group_size}
@@ -139,7 +107,7 @@ advantage:
     similarity_reward: 10
 
 # ---------------------------- Reference Model ------------------------------ #
-#
+
 reference:
   _component_: ppotune.comm.distributed_policy_mixture
   update_every_n_steps: 1000
@@ -147,23 +115,21 @@ reference:
     _component_: ppotune.comm.static_protocol
     weightage:
       _component_: ppotune.comm.uniform_weightage
-      self_preference: 1.0 # may be scheduled with volatile.linearly_scheduled
+      self_preference: 1.0
 
+# --------------------------------- Other ---------------------------------- #
 
-# --------------------------------- Other ----------------------------------- #
-#
 optimizer:
   _component_: bitsandbytes.optim.PagedAdamW
   lr: 1e-4
 
-dtype: bf16 # | fp32 | fp16 is not supported
+dtype: bf16
 
 kl_penalty:
   _component_: ppotune.loss.KLPenalty
   coeff: 0.1
 
 # PPO Loss
-# clipping hyperparameter
 epsilon: 0.2
 
 # Logging

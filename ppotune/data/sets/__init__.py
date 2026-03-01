@@ -23,6 +23,7 @@ from ppotune.data.sets.multi_hop import (
     two_hop_dataset,
     one_hop_dataset,
     mquake_dataset,
+    rultaker_dataset,
     math500_dataset,
 )
 from ppotune.data.sets.tldr import tldr_dataset
@@ -41,5 +42,6 @@ __all__ = [
     "two_hop_dataset",
     "three_hop_dataset",
     "mquake_dataset",
+    "rultaker_dataset",
     "math500_dataset",
 ]
