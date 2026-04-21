@@ -40,10 +40,10 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
-    actor_rollout_ref.rollout.max_model_len=2048 \
-    actor_rollout_ref.rollout.max_num_seqs=32 \
+    actor_rollout_ref.rollout.max_model_len=3072 \
+    actor_rollout_ref.rollout.max_num_seqs=64 \
     actor_rollout_ref.rollout.n=4 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.rollout.dtype=bfloat16 \
@@ -53,9 +53,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward.num_workers=2 \
-    reward.custom_reward_function.path=/home/vasgreg/TunePPO/ruletaker_reward.py \
+    reward.custom_reward_function.path=/home/vasgreg/TunePPO/verl_exp/ruletaker_reward.py \
     reward.custom_reward_function.name=compute_score \
-    +reward.custom_reward_function.reward_kwargs.log_file=/home/vasgreg/TunePPO/reward_log.jsonl \
+    +reward.custom_reward_function.reward_kwargs.log_file=/home/vasgreg/TunePPO/verl_exp/reward_log.jsonl \
     +reward.custom_reward_function.reward_kwargs.graph_coverage_scale=1.0 \
     +reward.custom_reward_function.reward_kwargs.llm_graph_extractor_enabled=${LLM_GRAPH_EXTRACTOR_ENABLED} \
     +reward.custom_reward_function.reward_kwargs.llm_graph_extractor_model=${LLM_GRAPH_EXTRACTOR_MODEL} \
