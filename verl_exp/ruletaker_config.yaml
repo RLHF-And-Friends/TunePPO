@@ -1,0 +1,77 @@
+defaults:
+  - ppo_trainer
+  - _self_
+
+algorithm:
+  adv_estimator: grpo
+  kl_ctrl:
+    kl_coef: 0.1
+  use_kl_in_reward: false
+  reward_log_keys:
+    - success_rate
+    - coverage
+    - reward_think_tags
+    - reward_answer_tags
+    - reward_correct_answer
+    - reward_reasoning
+    - reward_format
+
+data:
+  train_files: ./data/ruletaker/train.json
+  val_files: ./data/ruletaker/val.json
+  train_batch_size: 4
+  max_prompt_length: 1028
+  max_response_length: 512
+
+trainer:
+  logger: wandb
+  project_name: RULETAKER
+  experiment_name: VERL-QWEN3-Ruletaker-GRPO
+  val_before_train: false
+  n_gpus_per_node: 1
+  nnodes: 1
+  total_epochs: 1
+  resume_mode: disable
+
+actor_rollout_ref:
+
+  model:
+    path: Qwen/Qwen3-1.7B
+    lora_rank: 64
+    lora_alpha: 16
+
+  actor:
+    optim:
+      lr: 1e-4
+    ppo_mini_batch_size: 1
+    ppo_micro_batch_size_per_gpu: 1
+
+  rollout:
+    name: vllm
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.5
+    n: 8
+    log_prob_micro_batch_size_per_gpu: 1
+    dtype: bfloat16
+    load_format: safetensors
+    temperature: 0.7
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+
+custom_reward_function:
+  path: ./ruletaker_reward.py
+  name: compute_score
+  reward_kwargs:
+    answer_tag_reward: 5.0
+    think_tag_reward: 5.0
+    correct_answer_reward: 100.0
+    graph_coverage_reward: 50.0
+    graph_coverage_scale: 0.0
+    llm_graph_extractor_enabled: false
+    llm_graph_extractor_model: null
+    llm_graph_extractor_base_url: null
+    llm_graph_extractor_timeout: 30.0
+    llm_graph_extractor_temperature: 0.0
+    llm_graph_extractor_max_retries: 2
+    format_penalty: 10.0

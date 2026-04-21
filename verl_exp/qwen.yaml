@@ -1,0 +1,56 @@
+defaults:
+  - ppo_trainer
+  - _self_
+
+algorithm:
+  adv_estimator: grpo
+  kl_ctrl:
+    kl_coef: 0.1
+  use_kl_in_reward: false
+
+data:
+  train_files: /root/data/multihop/train.json
+  val_files: /root/data/multihop/train.json
+  train_batch_size: 4
+  max_prompt_length: 1028
+  max_response_length: 256
+
+trainer:
+  logger: wandb
+  project_name: MULTIHOP
+  experiment_name: VERL-QWEN3-Temp0.7-MaxResp256
+  val_before_train: false
+  n_gpus_per_node: 1
+  nnodes: 1
+  total_epochs: 1
+  resume_mode: disable
+
+actor_rollout_ref:
+
+  model:
+    path: Qwen/Qwen3-1.7B
+    lora_rank: 64
+    lora_alpha: 16
+
+  actor:
+    optim:
+      lr: 1e-4
+    ppo_mini_batch_size: 1
+    ppo_micro_batch_size_per_gpu: 1
+
+  rollout:
+    name: vllm
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.5
+    n: 8
+    log_prob_micro_batch_size_per_gpu: 1
+    dtype: bfloat16
+    load_format: safetensors
+    temperature: 0.7
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+
+custom_reward_function:
+  path: /home/kg_reasoning/multihop_reasoning_reward.py
+  name: multihop_reasoning_reward
