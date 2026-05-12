@@ -6,8 +6,12 @@ from typing import Any
 def extract_tags_and_content_length(text: str) -> tuple[dict[str, list[str]], int]:
     """
     Parse XML-like tags from text with regex.
-    Returns a dictionary with keys 'think', 'graph' and 'answer',
+    Returns a dictionary with keys 'think' and 'answer',
     plus the total word count of content outside these tags.
+
+    The <answer> block now carries BOTH the reasoning graph (JSON array of
+    triplets) AND the final label ('entailment' / 'not entailment').
+    Splitting those two is done downstream in `parse_answer_block`.
     """
     text = re.sub(r"<system_prompt>.*?</system_prompt>", "", text, flags=re.DOTALL)
     text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
@@ -28,16 +32,12 @@ def extract_tags_and_content_length(text: str) -> tuple[dict[str, list[str]], in
 
     tags = {
         "think": think_blocks,
-        "graph": re.findall(r"<graph>(.*?)</graph>", text, flags=re.DOTALL),
         "answer": re.findall(r"<answer>(.*?)</answer>", text, flags=re.DOTALL),
     }
 
     text_without_tags = text
     for strip_pat in think_strip_patterns:
         text_without_tags = re.sub(strip_pat, "", text_without_tags, flags=re.DOTALL)
-    text_without_tags = re.sub(
-        r"<graph>.*?</graph>", "", text_without_tags, flags=re.DOTALL
-    )
     text_without_tags = re.sub(
         r"<answer>.*?</answer>", "", text_without_tags, flags=re.DOTALL
     )
@@ -148,17 +148,24 @@ def get_ground_truth_triplets(
     return text_triplets, structured_triplets
 
 
-def parse_graph_output(
-    graph_text: str,
-) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    """Parse the model's self-reported <graph>...</graph> block into triplets.
+def parse_answer_block(
+    answer_text: str,
+) -> tuple[list[dict[str, str]], str, dict[str, Any]]:
+    """Parse the merged <answer> block into (predicted_triplets, label_text, metadata).
 
-    Accepted formats (tried in order):
+    Expected format inside <answer>:
+        [{"src": "...", "rel": "...", "tgt": "..."}, ...]
+        entailment | not entailment
+
+    Accepted graph formats inside <answer> (tried in order):
       1. JSON array of objects:  [{"src": "...", "rel": "...", "tgt": "..."}, ...]
       2. JSON array of arrays:   [["src", "rel", "tgt"], ...]
       3. JSON object with key:   {"triplets": [ ... ]}
       4. Same as above wrapped in ```json ... ``` fences.
-      5. Plain text fallback:    one "src rel tgt" per line.
+      5. Plain text fallback:    one "src rel tgt" per line (label on its own line).
+
+    label_text is whatever sits OUTSIDE the JSON array (or the non-triplet lines
+    in the fallback case) — that is what we feed to `normalize_answer`.
 
     No external LLM is called.
     """
@@ -166,49 +173,60 @@ def parse_graph_output(
         "graph_parse_ok": False,
         "graph_parse_mode": None,
         "graph_parse_error": None,
-        "graph_raw": graph_text,
+        "graph_raw": "",
     }
 
-    if graph_text is None or not str(graph_text).strip():
-        metadata["graph_parse_error"] = "empty graph block"
-        return [], metadata
+    if answer_text is None or not str(answer_text).strip():
+        metadata["graph_parse_error"] = "empty answer block"
+        return [], "", metadata
 
-    cleaned = re.sub(r"```(?:json)?", "", graph_text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"```(?:json)?", "", answer_text, flags=re.IGNORECASE)
     cleaned = cleaned.replace("```", "").strip()
 
-    payload: Any = None
-    try:
-        payload = json.loads(cleaned)
-        metadata["graph_parse_mode"] = "json"
-    except json.JSONDecodeError:
-        array_match = re.search(r"\[.*\]", cleaned, flags=re.DOTALL)
-        if array_match is not None:
-            try:
-                payload = json.loads(array_match.group(0))
-                metadata["graph_parse_mode"] = "json_extracted"
-            except json.JSONDecodeError:
-                payload = None
+    # Greedy: from first '[' to last ']' — captures multi-line JSON arrays.
+    array_match = re.search(r"\[.*\]", cleaned, flags=re.DOTALL)
 
-    if payload is None:
-        # Fallback: parse one "src rel tgt" per line.
+    if array_match is None:
+        # Fallback: maybe the model wrote "src rel tgt" per line.
         line_triplets: list[dict[str, str]] = []
+        non_triplet_lines: list[str] = []
         for line in cleaned.splitlines():
             parsed_triplet = triplet_from_string(line)
             if parsed_triplet is not None:
                 line_triplets.append(parsed_triplet)
+            else:
+                non_triplet_lines.append(line)
 
-        if not line_triplets:
-            metadata["graph_parse_error"] = "no JSON array or 'src rel tgt' lines found"
-            return [], metadata
+        if line_triplets:
+            metadata["graph_parse_ok"] = True
+            metadata["graph_parse_mode"] = "lines"
+            metadata["graph_raw"] = "\n".join(
+                format_triplet(t) for t in line_triplets
+            )
+            label_text = "\n".join(non_triplet_lines).strip()
+            return deduplicate_triplets(line_triplets), label_text, metadata
 
-        metadata["graph_parse_ok"] = True
-        metadata["graph_parse_mode"] = "lines"
-        return deduplicate_triplets(line_triplets), metadata
+        metadata["graph_parse_error"] = "no JSON array or 'src rel tgt' lines found"
+        return [], cleaned, metadata
+
+    graph_text = array_match.group(0)
+    metadata["graph_raw"] = graph_text
+    # Anything outside the array is the label.
+    label_text = (
+        cleaned[: array_match.start()] + " " + cleaned[array_match.end():]
+    ).strip()
+
+    try:
+        payload = json.loads(graph_text)
+        metadata["graph_parse_mode"] = "json"
+    except json.JSONDecodeError as exc:
+        metadata["graph_parse_error"] = f"json: {exc}"
+        return [], label_text, metadata
 
     items = payload.get("triplets") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         metadata["graph_parse_error"] = "payload is not a list of triplets"
-        return [], metadata
+        return [], label_text, metadata
 
     parsed_triplets: list[dict[str, str]] = []
     for item in items:
@@ -220,7 +238,7 @@ def parse_graph_output(
         parsed_triplets.append(parsed_triplet)
 
     metadata["graph_parse_ok"] = True
-    return deduplicate_triplets(parsed_triplets), metadata
+    return deduplicate_triplets(parsed_triplets), label_text, metadata
 
 
 def compute_triplet_match_score(
@@ -330,7 +348,6 @@ def zero_components() -> dict[str, float]:
         "graph_parse_ok": 0.0,
         "reward_think_tags": 0.0,
         "reward_answer_tags": 0.0,
-        "reward_graph_tags": 0.0,
         "reward_graph_parse": 0.0,
         "reward_correct_answer": 0.0,
         "reward_reasoning": 0.0,
@@ -367,9 +384,8 @@ def compute_score(
 ) -> dict[str, float]:
     answer_tag_reward = float(kwargs.get("answer_tag_reward", 5.0))
     think_tag_reward = float(kwargs.get("think_tag_reward", 5.0))
-    graph_tag_reward = float(kwargs.get("graph_tag_reward", 5.0))
     correct_answer_reward = float(kwargs.get("correct_answer_reward", 100.0))
-    graph_coverage_reward = float(kwargs.get("graph_coverage_reward", 50.0))
+    graph_coverage_reward = float(kwargs.get("graph_coverage_reward", 300.0))
     graph_coverage_scale = float(kwargs.get("graph_coverage_scale", 1.0))
     graph_parse_bonus = float(kwargs.get("graph_parse_bonus", 5.0))
     format_penalty = float(kwargs.get("format_penalty", 10.0))
@@ -395,10 +411,9 @@ def compute_score(
     _, ground_truth_triplets = get_ground_truth_triplets(gt)
 
     reasoning = tags["think"][0] if tags["think"] else ""
-    graph_text = tags["graph"][-1] if tags["graph"] else ""
-    answer = tags["answer"][-1] if tags["answer"] else ""
+    answer_text = tags["answer"][-1] if tags["answer"] else ""
 
-    # Tag rewards: encourage exactly one of each tag.
+    # Tag rewards: encourage exactly one <think> and one <answer>.
     reward_think_tags = 0.0
     if len(tags["think"]) == 1:
         reward_think_tags = think_tag_reward
@@ -410,21 +425,21 @@ def compute_score(
         reward_answer_tags = answer_tag_reward
     elif len(tags["answer"]) > 1:
         reward_answer_tags = -(len(tags["answer"]) - 1) * answer_tag_reward
+    else:
+        # No <answer> at all — graph + label are both missing, so hit harder.
+        reward_answer_tags = -answer_tag_reward * 10
 
-    reward_graph_tags = 0.0
-    if len(tags["graph"]) == 1:
-        reward_graph_tags = graph_tag_reward
-    elif len(tags["graph"]) > 1:
-        reward_graph_tags = -(len(tags["graph"]) - 1) * graph_tag_reward
+    # Split <answer> into (graph triplets, label remainder, parse metadata).
+    predicted_triplets, label_text, parse_metadata = parse_answer_block(answer_text)
 
-    # Answer correctness.
-    normalized = normalize_answer(answer)
+    # Answer correctness derived from the text outside the JSON array.
+    normalized = normalize_answer(label_text) if label_text else None
     is_correct = normalized is not None and normalized == gt_label
     reward_correct_answer = correct_answer_reward if is_correct else 0.0
 
-    # Parse the model's self-reported graph and score it directly against the GT.
-    predicted_triplets, parse_metadata = parse_graph_output(graph_text)
-    reward_graph_parse = graph_parse_bonus if parse_metadata["graph_parse_ok"] else 0.0
+    reward_graph_parse = (
+        graph_parse_bonus if parse_metadata["graph_parse_ok"] else 0.0
+    )
 
     coverage = 0.0
     coverage_details: dict[str, Any] = {
@@ -461,7 +476,6 @@ def compute_score(
     reward = (
         reward_think_tags
         + reward_answer_tags
-        + reward_graph_tags
         + reward_graph_parse
         + reward_correct_answer
         + reward_reasoning
@@ -478,8 +492,9 @@ def compute_score(
             extra_info,
             reward,
             reasoning=reasoning,
-            graph_raw=graph_text,
-            answer=answer,
+            answer_raw=answer_text,
+            graph_raw=parse_metadata.get("graph_raw"),
+            label_text=label_text,
             is_correct=is_correct,
             coverage=coverage,
             coverage_mode=coverage_details.get("coverage_mode"),
@@ -498,7 +513,6 @@ def compute_score(
             graph_parse_error=parse_metadata.get("graph_parse_error"),
             reward_think_tags=reward_think_tags,
             reward_answer_tags=reward_answer_tags,
-            reward_graph_tags=reward_graph_tags,
             reward_graph_parse=reward_graph_parse,
             reward_correct_answer=reward_correct_answer,
             reward_reasoning=reward_reasoning,
@@ -513,7 +527,6 @@ def compute_score(
         "graph_parse_ok": float(bool(parse_metadata.get("graph_parse_ok"))),
         "reward_think_tags": reward_think_tags,
         "reward_answer_tags": reward_answer_tags,
-        "reward_graph_tags": reward_graph_tags,
         "reward_graph_parse": reward_graph_parse,
         "reward_correct_answer": reward_correct_answer,
         "reward_reasoning": reward_reasoning,

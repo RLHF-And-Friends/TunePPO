@@ -7,22 +7,31 @@ ROOT="/home/user5/kg_reasoning_vg/TunePPO"
 
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
-export CUDA_HOME=/usr/local/cuda-13.2
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_HOME=/usr/local/cuda-12.3
+export CUDA_VISIBLE_DEVICES=5
 
+SCRATCH=/dev/shm/user5
+mkdir -p $SCRATCH/{ray_tmp,reward_logs,hf_cache}
+
+export RAY_TMPDIR=$SCRATCH/ray_tmp
+export HF_HOME=$SCRATCH/hf_cache
+export TRANSFORMERS_CACHE=$SCRATCH/hf_cache
+export WANDB_DIR=$SCRATCH/wandb
+mkdir -p $WANDB_DIR
 export PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.6
 export RAY_DISABLE_IMPORT_WARNING=1
 export RAY_DEDUP_LOGS=1
 export RAY_BACKEND_LOG_LEVEL=warning
 
+
 python3 -m verl.trainer.main_ppo \
-    +actor_rollout_ref.model.override_config.attn_implementation=sdpa \
+    +actor_rollout_ref.model.override_config.attn_implementation=flash_attention_2 \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     algorithm.kl_ctrl.kl_coef=0.1 \
     data.train_files=$ROOT/data/ruletaker/train.json \
     data.val_files=$ROOT/data/ruletaker/val.json \
-    data.train_batch_size=48 \
+    data.train_batch_size=128 \
     data.max_prompt_length=1024 \
     data.max_response_length=4096 \
     data.filter_overlong_prompts=True \
@@ -32,10 +41,10 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.lora_alpha=16 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=1e-4 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=24 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
-    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=10240 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=24576 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -43,31 +52,36 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.65 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.max_num_seqs=128 \
+    actor_rollout_ref.rollout.max_num_seqs=256 \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
-    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=20480 \
+    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=40960 \
     actor_rollout_ref.rollout.dtype=bfloat16 \
     actor_rollout_ref.rollout.load_format=safetensors \
     actor_rollout_ref.rollout.temperature=0.7 \
     actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
-    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=20480 \
+    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=40960 \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     reward.num_workers=16 \
     reward.custom_reward_function.path=$ROOT/verl_exp/struct_reasoning_reward.py \
     reward.custom_reward_function.name=compute_score \
-    +reward.custom_reward_function.reward_kwargs.log_file=$ROOT/verl_exp/reward_log.jsonl \
     +reward.custom_reward_function.reward_kwargs.graph_coverage_scale=1.0 \
-    +algorithm.reward_log_keys=[success_rate,coverage,graph_parse_ok,reward_think_tags,reward_answer_tags,reward_graph_tags,reward_graph_parse,reward_correct_answer,reward_reasoning,reward_format] \
-    trainer.logger='["console", "wandb"]' \
+    +algorithm.reward_log_keys=[success_rate,coverage,graph_parse_ok,reward_think_tags,reward_answer_tags,reward_graph_parse,reward_correct_answer,reward_reasoning,reward_format]    trainer.logger='["console", "wandb"]' \
     trainer.project_name=MULTIHOP \
-    trainer.experiment_name=VERL-QWEN3-0.6B-Ruletaker-GRPO-STRUCT-H100 \
-    trainer.val_before_train=False \
+    trainer.experiment_name=VERL-QWEN3-0.6B-STRUCT-H100-cov300 \
+    trainer.val_before_train=True \
+    data.val_max_samples=100 \
+    trainer.val_before_train=True \
+    trainer.test_freq=10 \
+    trainer.log_val_generations=2 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.total_epochs=1 \
