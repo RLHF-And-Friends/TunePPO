@@ -385,7 +385,7 @@ def compute_score(
     answer_tag_reward = float(kwargs.get("answer_tag_reward", 5.0))
     think_tag_reward = float(kwargs.get("think_tag_reward", 5.0))
     correct_answer_reward = float(kwargs.get("correct_answer_reward", 100.0))
-    graph_coverage_reward = float(kwargs.get("graph_coverage_reward", 300.0))
+    graph_coverage_reward = float(kwargs.get("graph_coverage_reward", 100.0))
     graph_coverage_scale = float(kwargs.get("graph_coverage_scale", 1.0))
     graph_parse_bonus = float(kwargs.get("graph_parse_bonus", 5.0))
     format_penalty = float(kwargs.get("format_penalty", 10.0))

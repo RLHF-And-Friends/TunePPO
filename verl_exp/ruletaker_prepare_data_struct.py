@@ -42,6 +42,18 @@ SYSTEM_PROMPT = (
     "</answer>"
 )
 
+SYSTEM_PROMPT_BASELINE = (
+    "You are a logical reasoning assistant. "
+    "Given a context containing facts and rules about entities, "
+    "determine whether a given statement can be logically derived "
+    "from the provided information.\n\n"
+    "Analyze the context step by step, identifying which facts and "
+    "rules are relevant to prove or disprove the statement. "
+    "Put your reasoning in <think> tags and your final answer in <answer> tags. "
+    "Your answer must be exactly \"entailment\" if the statement follows from "
+    "the context, or \"not entailment\" if it does not."
+)
+
 USER_TEMPLATE = (
     "Context:\n{context}\n\n"
     "Statement: {question}\n\n"
@@ -112,7 +124,7 @@ def make_verl_row(item: dict, idx: int) -> dict:
 
     user_content = USER_TEMPLATE.format(context=context, question=question)
     prompt = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT_BASELINE},
         {"role": "user", "content": user_content},
     ]
 

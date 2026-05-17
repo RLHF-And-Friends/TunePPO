@@ -8,7 +8,7 @@ ROOT="/home/user5/kg_reasoning_vg/TunePPO"
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
 export CUDA_HOME=/usr/local/cuda-12.3
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_VISIBLE_DEVICES=1
 
 SCRATCH=/dev/shm/user5
 mkdir -p $SCRATCH/{ray_tmp,reward_logs,hf_cache}
@@ -56,6 +56,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.max_model_len=8192 \
     actor_rollout_ref.rollout.max_num_seqs=256 \
     actor_rollout_ref.rollout.n=8 \
+    data.seed=42 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=40960 \
@@ -71,11 +72,13 @@ python3 -m verl.trainer.main_ppo \
     reward.custom_reward_function.path=$ROOT/verl_exp/struct_reasoning_reward.py \
     reward.custom_reward_function.name=compute_score \
     +reward.custom_reward_function.reward_kwargs.graph_coverage_scale=1.0 \
+    +reward.custom_reward_function.reward_kwargs.graph_coverage_reward=50.0 \
+    +reward.custom_reward_function.reward_kwargs.correct_answer_reward=50.0 \
     +algorithm.reward_log_keys=[success_rate,coverage,graph_parse_ok,reward_think_tags,reward_answer_tags,reward_graph_parse,reward_correct_answer,reward_reasoning,reward_format]    trainer.logger='["console", "wandb"]' \
     trainer.project_name=MULTIHOP \
-    trainer.experiment_name=VERL-QWEN3-0.6B-STRUCT-H100-cov300 \
+    trainer.experiment_name=VERL-QWEN3-0.6B-STRUCT-H100-cov50-ans50-bigval \
     trainer.val_before_train=True \
-    data.val_max_samples=100 \
+    data.val_max_samples=2000 \
     trainer.val_before_train=True \
     trainer.test_freq=10 \
     trainer.log_val_generations=2 \
@@ -85,7 +88,9 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.total_epochs=1 \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=auto \
     +reward.custom_reward_function.reward_kwargs.graph_tag_reward=5.0 \
     +reward.custom_reward_function.reward_kwargs.graph_parse_bonus=5.0 \
+    trainer.save_freq=50 \
+    trainer.max_actor_ckpt_to_keep=1 \
     "$@"

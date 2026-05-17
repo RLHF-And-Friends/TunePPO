@@ -9,3 +9,4 @@ ppo_tune.egg-info
 outputs*
 data*
 wandb*
+checkpoints/
