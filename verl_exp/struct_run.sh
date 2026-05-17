@@ -1,9 +1,9 @@
 #!/bin/bash
 set -x
 
-source /home/user5/kg_reasoning_vg/TunePPO/.venv/bin/activate
+source /home/alexeyorlov53/TunePPO/TunePPO/.venv/bin/activate
 
-ROOT="/home/user5/kg_reasoning_vg/TunePPO"
+ROOT="/home/alexeyorlov53/TunePPO/TunePPO"
 
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 

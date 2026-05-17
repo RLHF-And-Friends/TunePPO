@@ -1,9 +1,9 @@
 #!/bin/bash
 set -x
 
-source /home/vasgreg/TunePPO/venv/bin/activate
+source /home/alexeyorlov53/TunePPO/venv/bin/activate
 
-export PYTHONPATH="/home/vasgreg/TunePPO/verl${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="/home/alexeyorlov53/TunePPO/verl${PYTHONPATH:+:$PYTHONPATH}"
 
 export CUDA_HOME=/usr/local/cuda-12.3
 export VLLM_USE_V1=1
@@ -20,8 +20,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     algorithm.kl_ctrl.kl_coef=0.1 \
-    data.train_files=/home/vasgreg/TunePPO/data/ruletaker/train.json \
-    data.val_files=/home/vasgreg/TunePPO/data/ruletaker/val.json \
+    data.train_files=/home/alexeyorlov53/TunePPO/data/ruletaker/train.json \
+    data.val_files=/home/alexeyorlov53/TunePPO/data/ruletaker/val.json \
     data.train_batch_size=4 \
     data.max_prompt_length=512 \
     data.max_response_length=4096 \
@@ -53,9 +53,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward.num_workers=2 \
-    reward.custom_reward_function.path=/home/vasgreg/TunePPO/verl_exp/ruletaker_reward.py \
+    reward.custom_reward_function.path=/home/alexeyorlov53/TunePPO/verl_exp/ruletaker_reward.py \
     reward.custom_reward_function.name=compute_score \
-    +reward.custom_reward_function.reward_kwargs.log_file=/home/vasgreg/TunePPO/verl_exp/reward_log.jsonl \
+    +reward.custom_reward_function.reward_kwargs.log_file=/home/alexeyorlov53/TunePPO/verl_exp/reward_log.jsonl \
     +reward.custom_reward_function.reward_kwargs.graph_coverage_scale=1.0 \
     +reward.custom_reward_function.reward_kwargs.llm_graph_extractor_enabled=${LLM_GRAPH_EXTRACTOR_ENABLED} \
     +reward.custom_reward_function.reward_kwargs.llm_graph_extractor_model=${LLM_GRAPH_EXTRACTOR_MODEL} \

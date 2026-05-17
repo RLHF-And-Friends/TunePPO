@@ -1,16 +1,16 @@
 #!/bin/bash
 set -x
 
-source /home/user5/kg_reasoning_vg/TunePPO/.venv/bin/activate
+source /home/alexeyorlov53/TunePPO/.venv/bin/activate
 
-ROOT="/home/user5/kg_reasoning_vg/TunePPO"
+ROOT="/home/alexeyorlov53/TunePPO"
 
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
 export CUDA_HOME=/usr/local/cuda-12.3
 export CUDA_VISIBLE_DEVICES=5
 
-SCRATCH=/dev/shm/user5
+SCRATCH=/dev/shm/alexeyorlov53
 EXP_NAME=VERL-QWEN3-0.6B-STRUCT-H100-cov100-ans100-bigval
 RAY_TMP=$SCRATCH/ray_tmp_$CUDA_VISIBLE_DEVICES
 REWARD_LOG_DIR=$SCRATCH/reward_logs/$EXP_NAME
