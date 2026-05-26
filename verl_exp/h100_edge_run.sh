@@ -8,10 +8,10 @@ ROOT="/home/user5/kg_reasoning_vg/TunePPO"
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
 export CUDA_HOME=/usr/local/cuda-12.3
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_VISIBLE_DEVICES=1
 
 SCRATCH=/dev/shm/user5
-EXP_NAME=VERL-QWEN3-0.6B-STRUCT-H100-cov100-ans100-bigval
+EXP_NAME=VERL-QWEN3-0.6B-EDGE
 RAY_TMP=$SCRATCH/ray_tmp_$CUDA_VISIBLE_DEVICES
 REWARD_LOG_DIR=$SCRATCH/reward_logs/$EXP_NAME
 mkdir -p $RAY_TMP $REWARD_LOG_DIR $SCRATCH/hf_cache
@@ -29,14 +29,13 @@ export MASTER_PORT=$((29500 + CUDA_VISIBLE_DEVICES))
 export RAY_ADDRESS=local
 
 
-
 python3 -m verl.trainer.main_ppo \
     +actor_rollout_ref.model.override_config.attn_implementation=flash_attention_2 \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     algorithm.kl_ctrl.kl_coef=0.1 \
-    data.train_files=$ROOT/data/ruletaker/train.json \
-    data.val_files=$ROOT/data/ruletaker/val.json \
+    data.train_files=$ROOT/data/ruletaker_kg/train.json \
+    data.val_files=$ROOT/data/ruletaker_kg/val.json \
     data.train_batch_size=128 \
     data.max_prompt_length=1024 \
     data.max_response_length=4096 \
@@ -75,18 +74,19 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=40960 \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     reward.num_workers=16 \
-    reward.custom_reward_function.path=$ROOT/verl_exp/struct_reasoning_reward.py \
+    reward.custom_reward_function.path=$ROOT/verl_exp/edge_reasoning_reward.py \
     reward.custom_reward_function.name=compute_score \
-    +reward.custom_reward_function.reward_kwargs.graph_coverage_scale=1.0 \
-    +reward.custom_reward_function.reward_kwargs.graph_coverage_reward=100.0 \
+    +reward.custom_reward_function.reward_kwargs.graph_validity_scale=1.0 \
+    +reward.custom_reward_function.reward_kwargs.graph_validity_reward=100.0 \
     +reward.custom_reward_function.reward_kwargs.correct_answer_reward=100.0 \
+    +reward.custom_reward_function.reward_kwargs.graph_parse_bonus=5.0 \
     +reward.custom_reward_function.reward_kwargs.log_file=$REWARD_LOG_DIR/reward_log.jsonl \
-    +algorithm.reward_log_keys=[success_rate,coverage,graph_parse_ok,reward_think_tags,reward_answer_tags,reward_graph_parse,reward_correct_answer,reward_reasoning,reward_format]    trainer.logger='["console", "wandb"]' \
+    +algorithm.reward_log_keys=[success_rate,graph_coverage,graph_parse_ok,reward_think_tags,reward_answer_tags,reward_graph_parse,reward_correct_answer,reward_graph_validity,reward_format] \
+    trainer.logger='["console", "wandb"]' \
     trainer.project_name=MULTIHOP \
     trainer.experiment_name=$EXP_NAME \
     trainer.val_before_train=True \
-    data.val_max_samples=2000 \
-    trainer.val_before_train=True \
+    data.val_max_samples=1000 \
     trainer.test_freq=10 \
     trainer.log_val_generations=2 \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
@@ -96,8 +96,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.total_epochs=1 \
     trainer.resume_mode=auto \
-    +reward.custom_reward_function.reward_kwargs.graph_tag_reward=5.0 \
-    +reward.custom_reward_function.reward_kwargs.graph_parse_bonus=5.0 \
-    trainer.save_freq=20 \
+    trainer.save_freq=10 \
     trainer.max_actor_ckpt_to_keep=1 \
     "$@"

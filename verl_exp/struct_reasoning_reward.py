@@ -1,6 +1,9 @@
 import json
 import re
+from itertools import count
 from typing import Any
+
+_log_counter = count()
 
 
 def extract_tags_and_content_length(text: str) -> tuple[dict[str, list[str]], int]:
@@ -390,11 +393,13 @@ def compute_score(
     graph_parse_bonus = float(kwargs.get("graph_parse_bonus", 5.0))
     format_penalty = float(kwargs.get("format_penalty", 10.0))
     log_file = kwargs.get("log_file", None)
+    log_sample_rate = int(kwargs.get("log_sample_rate", 100))
+    should_log = log_file and (next(_log_counter) % log_sample_rate == 0)
 
     try:
         tags, content_len = extract_tags_and_content_length(solution_str)
     except Exception as exc:
-        if log_file:
+        if should_log:
             append_reward_log(
                 log_file,
                 solution_str,
@@ -484,7 +489,7 @@ def compute_score(
 
     acc = float(is_correct)
 
-    if log_file:
+    if should_log:
         append_reward_log(
             log_file,
             solution_str,

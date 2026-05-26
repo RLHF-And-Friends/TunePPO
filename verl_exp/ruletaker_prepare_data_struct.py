@@ -62,6 +62,15 @@ USER_TEMPLATE = (
 )
 
 
+def has_negation(item: dict) -> bool:
+    """Return True if any fact or rule involves a negation relation."""
+    for s in item.get("structured", []):
+        for t in s.get("consequents", []) + s.get("conditions", []):
+            if "not" in t.get("rel", "").lower():
+                return True
+    return False
+
+
 def make_triplet(src: str, rel: str, tgt: str) -> dict[str, str]:
     return {
         "src": src.strip(),
@@ -196,8 +205,22 @@ def main():
         "--max_depth",
         type=str,
         default=None,
-        help="Filter by config prefix, e.g. 'depth-1' or 'depth-3'",
+        help="Filter by config prefix(es), comma-separated. E.g. 'depth-1,depth-2,depth-3'",
     )
+    parser.add_argument(
+        "--filter_negations",
+        action="store_true",
+        default=True,
+        help="Skip examples with negation relations (is not, does not, etc.)",
+    )
+    parser.add_argument("--no_filter_negations", dest="filter_negations", action="store_false")
+    parser.add_argument(
+        "--filter_natlang",
+        action="store_true",
+        default=True,
+        help="Skip NatLang configs (less structured, harder for graph extraction)",
+    )
+    parser.add_argument("--no_filter_natlang", dest="filter_natlang", action="store_false")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -207,9 +230,25 @@ def main():
     raw_data = load_raw_data(args)
     print(f"Loaded {len(raw_data)} examples")
 
+    if args.filter_negations:
+        before = len(raw_data)
+        raw_data = [d for d in raw_data if not has_negation(d)]
+        print(f"After negation filter: {len(raw_data)} (removed {before - len(raw_data)})")
+
+    if args.filter_natlang:
+        before = len(raw_data)
+        raw_data = [d for d in raw_data if "NatLang" not in d["config"]]
+        print(f"After NatLang filter: {len(raw_data)} (removed {before - len(raw_data)})")
+
     if args.max_depth:
-        raw_data = [d for d in raw_data if d["config"].startswith(args.max_depth)]
-        print(f"Filtered to {len(raw_data)} examples with config={args.max_depth}*")
+        prefixes = [p.strip() for p in args.max_depth.split(",")]
+        before = len(raw_data)
+        raw_data = [d for d in raw_data if any(d["config"].startswith(p) for p in prefixes)]
+        print(f"After depth filter ({args.max_depth}): {len(raw_data)} (removed {before - len(raw_data)})")
+
+    from collections import Counter
+    print(f"Configs: {dict(Counter(d['config'] for d in raw_data))}")
+    print(f"Labels:  {dict(Counter(d['label'] for d in raw_data))}")
 
     random.seed(args.seed)
     random.shuffle(raw_data)
