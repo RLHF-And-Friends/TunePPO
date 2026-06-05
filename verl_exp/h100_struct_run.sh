@@ -8,7 +8,7 @@ ROOT="/home/alexeyorlov53/TunePPO"
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
 export CUDA_HOME=/usr/local/cuda-12
-export CUDA_VISIBLE_DEVICES=6
+export CUDA_VISIBLE_DEVICES=4
 
 SCRATCH=/dev/shm/alexeyorlov53
 EXP_NAME=VERL-QWEN3-0.6B-STRUCT-H100-cov100-ans100-bigval
@@ -19,6 +19,7 @@ mkdir -p $RAY_TMP $REWARD_LOG_DIR $SCRATCH/hf_cache
 export RAY_TMPDIR=$RAY_TMP
 export HF_HOME=$SCRATCH/hf_cache
 export TRANSFORMERS_CACHE=$SCRATCH/hf_cache
+export PYTHONSTARTUP="$ROOT/.venv/lib/python3.11/site-packages/sitecustomize.py"
 export WANDB_DIR=$SCRATCH/wandb
 mkdir -p $WANDB_DIR
 export PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.6
@@ -29,6 +30,7 @@ export MASTER_PORT=$((29500 + CUDA_VISIBLE_DEVICES))
 export RAY_ADDRESS=local
 
 export RAY_DISABLE_DASHBOARD=1
+export RAY_memory_monitor_refresh_ms=0
 
 
 python3 -m verl.trainer.main_ppo \
@@ -36,12 +38,12 @@ python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     algorithm.kl_ctrl.kl_coef=0.1 \
-    data.train_files=$ROOT/data/ruletaker/train.json \
-    data.val_files=$ROOT/data/ruletaker/val.json \
+    data.train_files=$ROOT/data/ruletaker/train_filtered.parquet \
+    data.val_files=$ROOT/data/ruletaker/val_filtered.parquet \
     data.train_batch_size=128 \
     data.max_prompt_length=1024 \
     data.max_response_length=4096 \
-    data.filter_overlong_prompts=True \
+    data.filter_overlong_prompts=False \
     data.truncation=error \
     actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
     actor_rollout_ref.model.lora_rank=64 \
