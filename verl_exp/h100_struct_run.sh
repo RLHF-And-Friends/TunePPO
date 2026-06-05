@@ -7,8 +7,8 @@ ROOT="/home/alexeyorlov53/TunePPO"
 
 export PYTHONPATH="$ROOT/verl${PYTHONPATH:+:$PYTHONPATH}"
 
-export CUDA_HOME=/usr/local/cuda-12.3
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_HOME=/usr/local/cuda-12
+export CUDA_VISIBLE_DEVICES=6
 
 SCRATCH=/dev/shm/alexeyorlov53
 EXP_NAME=VERL-QWEN3-0.6B-STRUCT-H100-cov100-ans100-bigval
@@ -28,6 +28,7 @@ export RAY_BACKEND_LOG_LEVEL=warning
 export MASTER_PORT=$((29500 + CUDA_VISIBLE_DEVICES))
 export RAY_ADDRESS=local
 
+export RAY_DISABLE_DASHBOARD=1
 
 
 python3 -m verl.trainer.main_ppo \
@@ -44,7 +45,6 @@ python3 -m verl.trainer.main_ppo \
     data.truncation=error \
     actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
     actor_rollout_ref.model.lora_rank=64 \
-    actor_rollout_ref.model.lora_alpha=16 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=1e-4 \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
